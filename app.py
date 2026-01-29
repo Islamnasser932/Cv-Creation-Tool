@@ -28,9 +28,9 @@ with st.sidebar:
     
     st.markdown("""
     **How to build a world-class CV:**
-    1. **Have an old CV?** Upload it in Step 1, and we will auto-fill your data!
-    2. **Writer's Block?** Use the "Get Suggestions" button in Step 3 to generate professional bullet points.
-    3. **Finish:** Download your ATS-optimized Resume & Cover Letter.
+    1. **Have an old CV?** Upload it in Step 1 to auto-fill (now detects College!).
+    2. **Writer's Block?** Use "Get Suggestions" in Step 3.
+    3. **Finish:** Download your ATS-optimized Resume.
     """)
     
     st.divider()
@@ -71,18 +71,21 @@ def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
 
+# --- UPDATED PARSER FUNCTION ---
 def parse_resume_with_ai(text):
-    """Extract structured data from raw resume text"""
+    """Extract structured data including College/Faculty"""
     prompt = f"""
     Extract the following details from this resume text:
     Name, Email, Phone, City, LinkedIn, Target Job Title (infer if not present), 
-    Skills (as a comma-separated string), and Professional Experience (raw text).
+    Skills (comma-separated), Experience (raw text),
+    University, College (Faculty), Degree, and Graduation Year.
     
     Resume Text:
     {text[:4000]} 
     
     Output ONLY a valid JSON object with these keys: 
-    "name", "email", "phone", "city", "linkedin", "target_title", "skills", "experience".
+    "name", "email", "phone", "city", "linkedin", "target_title", "skills", "experience", 
+    "university", "college", "degree", "grad_year".
     """
     try:
         completion = client.chat.completions.create(
@@ -126,7 +129,7 @@ def safe_generate(prompt_text):
     except Exception as e:
         return f"Error: {str(e)}"
 
-# --- 4. File Generation Functions (Word & PDF) ---
+# --- 4. File Generation Functions ---
 
 def create_docx(text):
     doc = Document()
@@ -141,89 +144,45 @@ def create_docx(text):
         
         line_no_num = re.sub(r'^\d+\.\s*', '', line)
         
-        # Header Detection logic
         if line_no_num.isupper() and len(line_no_num) < 60 and "|" not in line:
             p = doc.add_paragraph()
-            p.paragraph_format.space_before = Pt(12)
-            p.paragraph_format.space_after = Pt(6)
-            run = p.add_run(line_no_num)
-            run.bold = True
-            run.font.size = Pt(12)
+            p.paragraph_format.space_before = Pt(12); p.paragraph_format.space_after = Pt(6)
+            run = p.add_run(line_no_num); run.bold = True; run.font.size = Pt(12)
             p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER if "NAME" not in line else WD_PARAGRAPH_ALIGNMENT.LEFT
-            
         elif "|" in line and "@" in line:
-            p = doc.add_paragraph(line)
-            p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            p.paragraph_format.space_after = Pt(12)
-            
+            p = doc.add_paragraph(line); p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER; p.paragraph_format.space_after = Pt(12)
         elif "|" in line and "@" not in line:
-            p = doc.add_paragraph()
-            p.paragraph_format.space_before = Pt(8) 
-            run = p.add_run(line)
-            run.bold = True 
-            run.font.size = Pt(11)
-            p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-            
+            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(8); run = p.add_run(line); run.bold = True; run.font.size = Pt(11); p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
         elif line.startswith('-') or line.startswith('•'):
-            clean_line = line.replace('•', '').replace('-', '').strip()
-            p = doc.add_paragraph(clean_line, style='List Bullet')
-            p.paragraph_format.space_after = Pt(2) 
-            
+            clean_line = line.replace('•', '').replace('-', '').strip(); p = doc.add_paragraph(clean_line, style='List Bullet'); p.paragraph_format.space_after = Pt(2) 
         else:
-            p = doc.add_paragraph(line)
-            p.paragraph_format.space_after = Pt(2)
-
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
+            p = doc.add_paragraph(line); p.paragraph_format.space_after = Pt(2)
+    buffer = io.BytesIO(); doc.save(buffer); buffer.seek(0)
     return buffer
 
 def create_pdf(text):
     class PDF(FPDF):
         def header(self): pass
         def footer(self): pass
-            
-    pdf = PDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    
+    pdf = PDF(); pdf.add_page(); pdf.set_auto_page_break(auto=True, margin=15)
     text = text.replace("**", "").replace("##", "")
     replacements = {u'\u2013': '-', u'\u2014': '-', u'\u2018': "'", u'\u2019': "'", u'\u201c': '"', u'\u201d': '"', '•': '-', '–': '-'}
     for k, v in replacements.items(): text = text.replace(k, v)
     try: text = text.encode('latin-1', 'replace').decode('latin-1')
     except: text = text 
-    
     for line in text.split('\n'):
-        line = line.strip()
-        if not line: continue
-        if "___" in line: continue
-
+        line = line.strip(); if not line: continue; if "___" in line: continue
         line_no_num = re.sub(r'^\d+\.\s*', '', line)
-
         if line_no_num.isupper() and len(line_no_num) < 60 and "|" not in line:
-            pdf.ln(6); pdf.set_font("Arial", 'B', size=12); pdf.cell(0, 6, line_no_num, ln=True, align='C')
-            x = pdf.get_x(); y = pdf.get_y(); pdf.line(x + 10, y, 200, y); pdf.ln(4)
-            
-        elif "|" in line and "@" in line:
-            pdf.set_font("Arial", size=9); pdf.multi_cell(0, 5, line, align='C'); pdf.ln(4)
-            
-        elif "|" in line and "@" not in line:
-            pdf.ln(4); pdf.set_font("Arial", 'B', size=10); pdf.cell(0, 6, line, ln=True, align='L'); pdf.ln(2)
-            
-        elif line.startswith('-'):
-            pdf.set_font("Arial", size=10); clean_line = line.replace('-', '').strip()
-            pdf.multi_cell(0, 5, chr(149) + " " + clean_line); pdf.ln(2)
-            
-        else:
-            pdf.set_font("Arial", size=10); pdf.multi_cell(0, 5, line); pdf.ln(1)
-            
-    buffer = io.BytesIO()
-    pdf_output = pdf.output(dest='S').encode('latin-1')
-    buffer.write(pdf_output)
-    buffer.seek(0)
+            pdf.ln(6); pdf.set_font("Arial", 'B', size=12); pdf.cell(0, 6, line_no_num, ln=True, align='C'); x = pdf.get_x(); y = pdf.get_y(); pdf.line(x + 10, y, 200, y); pdf.ln(4)
+        elif "|" in line and "@" in line: pdf.set_font("Arial", size=9); pdf.multi_cell(0, 5, line, align='C'); pdf.ln(4)
+        elif "|" in line and "@" not in line: pdf.ln(4); pdf.set_font("Arial", 'B', size=10); pdf.cell(0, 6, line, ln=True, align='L'); pdf.ln(2)
+        elif line.startswith('-'): pdf.set_font("Arial", size=10); clean_line = line.replace('-', '').strip(); pdf.multi_cell(0, 5, chr(149) + " " + clean_line); pdf.ln(2)
+        else: pdf.set_font("Arial", size=10); pdf.multi_cell(0, 5, line); pdf.ln(1)
+    buffer = io.BytesIO(); pdf_output = pdf.output(dest='S').encode('latin-1'); buffer.write(pdf_output); buffer.seek(0)
     return buffer
 
-# --- 5. Session State Management ---
+# --- 5. Session State ---
 if 'step' not in st.session_state: st.session_state.step = 1
 if 'cv_data' not in st.session_state: st.session_state.cv_data = {}
 for key in ['final_cv', 'cover_letter', 'ats_analysis']:
@@ -241,34 +200,28 @@ st.markdown("##### Your AI-Powered Assistant for ATS-Optimized Resumes")
 if st.session_state.step < 6: st.progress(st.session_state.step / 6)
 
 # ==========================================
-# STEP 1: Personal Info & Resume Parsing
+# STEP 1: Personal Info (UPDATED WITH COLLEGE)
 # ==========================================
 if st.session_state.step == 1:
     st.header("1️⃣ Personal Information")
     
-    # --- Resume Parser Feature ---
-    with st.expander("📄 Have an old CV? Upload to Auto-Fill (Optional)", expanded=False):
+    # --- Resume Parser ---
+    with st.expander("📄 Have an old CV? Upload to Auto-Fill", expanded=False):
         uploaded_file = st.file_uploader("Upload PDF or Word file", type=['pdf', 'docx', 'doc'])
         if uploaded_file is not None:
             if st.button("🧠 Auto-Fill with AI"):
                 with st.spinner("Reading file..."):
                     try:
-                        if uploaded_file.name.endswith('.pdf'):
-                            text = extract_text_from_pdf(uploaded_file)
-                        else:
-                            text = extract_text_from_docx(uploaded_file)
+                        if uploaded_file.name.endswith('.pdf'): text = extract_text_from_pdf(uploaded_file)
+                        else: text = extract_text_from_docx(uploaded_file)
                         
                         parsed_data = parse_resume_with_ai(text)
-                        
                         if parsed_data:
                             st.session_state.cv_data.update(parsed_data)
-                            st.success("Data extracted successfully! Please review below.")
+                            st.success("Data extracted! Please review below.")
                             st.rerun()
-                        else:
-                            st.error("Could not parse file. Please fill details manually.")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-    # -----------------------
+                        else: st.error("Could not parse file.")
+                    except Exception as e: st.error(f"Error: {e}")
 
     st.info("Or fill in your details manually:")
     with st.form("step1"):
@@ -286,17 +239,24 @@ if st.session_state.step == 1:
         st.markdown("---")
         target_title = st.text_input("🔴 Target Job Title (Important for ATS)", st.session_state.cv_data.get('target_title', ''))
         
-        c1, c2, c3 = st.columns(3)
+        st.markdown("### 🎓 Education")
+        # --- UPDATED COLUMNS FOR COLLEGE ---
+        c1, c2, c3, c4 = st.columns(4)
         with c1: university = st.text_input("University", st.session_state.cv_data.get('university', ''))
-        with c2: degree = st.text_input("Degree", st.session_state.cv_data.get('degree', ''))
-        with c3: grad_year = st.text_input("Graduation Year", st.session_state.cv_data.get('grad_year', ''))
+        with c2: college = st.text_input("College/Faculty", st.session_state.cv_data.get('college', ''), placeholder="e.g. Faculty of Engineering")
+        with c3: degree = st.text_input("Degree", st.session_state.cv_data.get('degree', ''))
+        with c4: grad_year = st.text_input("Grad Year", st.session_state.cv_data.get('grad_year', ''))
 
         if st.form_submit_button("Next Step ➡️"):
             if name and target_title:
                 st.session_state.cv_data.update({
                     'name':name, 'email':email, 'phone':phone, 'linkedin':linkedin, 'city':city, 
                     'portfolio':portfolio, 'github':github, 
-                    'target_title':target_title, 'university':university, 'degree':degree, 'grad_year':grad_year
+                    'target_title':target_title, 
+                    'university':university, 
+                    'college':college, # Saved here
+                    'degree':degree, 
+                    'grad_year':grad_year
                 })
                 next_step(); st.rerun()
             else: st.warning("Name and Target Job Title are required!")
@@ -320,34 +280,25 @@ elif st.session_state.step == 2:
                 next_step(); st.rerun()
 
 # ==========================================
-# STEP 3: Experience (AI SUGGESTIONS ONLY)
+# STEP 3: Experience
 # ==========================================
 elif st.session_state.step == 3:
     st.header("3️⃣ Professional Experience")
     
-    st.info("💡 Tip: Use the AI Suggestions if you need inspiration for your role.")
-
-    # --- AI Suggestions Only ---
     st.markdown("##### ✨ Get AI Suggestions:")
     c_input, c_btn = st.columns([3, 1])
-    
     with c_input:
         default_role = st.session_state.cv_data.get('target_title', '')
-        suggestion_role = st.text_input("Enter Role Title for Suggestions", value=default_role, label_visibility='collapsed', placeholder="e.g., Accountant")
-    
+        suggestion_role = st.text_input("Enter Role Title for Suggestions", value=default_role, label_visibility='collapsed')
     with c_btn:
         if st.button("Get Suggestions 🧠", use_container_width=True):
             if suggestion_role:
                 with st.spinner("Thinking..."):
                     sugg = get_job_suggestions(suggestion_role)
                     current_text = st.session_state.cv_data.get('raw_experience', '')
-                    # Append suggestions
                     st.session_state.cv_data['raw_experience'] = current_text + "\n" + sugg
-                    st.success("Suggestions added below! Edit as needed.")
                     st.rerun()
-            else:
-                st.warning("Please enter a role title first!")
-    # ----------------------------------------
+            else: st.warning("Please enter a role title!")
 
     with st.form("step3"):
         st.write("👇 Edit your experience here:")
@@ -380,7 +331,7 @@ elif st.session_state.step == 4:
                 next_step(); st.rerun()
 
 # ==========================================
-# STEP 5: Target Job (For ATS)
+# STEP 5: Target Job
 # ==========================================
 elif st.session_state.step == 5:
     st.header("5️⃣ Target Job Details (For ATS)")
@@ -410,7 +361,6 @@ elif st.session_state.step == 6:
     t1, t2, t3 = st.tabs(["📄 Resume Preview", "✉️ Cover Letter", "📊 ATS Score"])
     jd = st.session_state.cv_data.get('target_job', '')
 
-    # --- TAB 1: CV Preview & Download ---
     with t1:
         if not st.session_state.final_cv:
             with st.spinner("⏳ Writing your resume..."):
@@ -422,6 +372,7 @@ elif st.session_state.step == 6:
                 if st.session_state.cv_data.get('certs'): optional_prompt += f"\n6. **CERTIFICATIONS**\n   - {st.session_state.cv_data['certs']}"
                 if st.session_state.cv_data.get('volunteering'): optional_prompt += f"\n7. **VOLUNTEERING**\n   - {st.session_state.cv_data['volunteering']}"
 
+                # --- UPDATED FINAL PROMPT WITH COLLEGE ---
                 prompt_cv = f"""
                 Act as a Senior Resume Expert. Write a professional CV based on this data.
                 **RULES:**
@@ -440,41 +391,38 @@ elif st.session_state.step == 6:
                 TECHNICAL SKILLS ({st.session_state.cv_data['skills']})
                 PROFESSIONAL EXPERIENCE (Role | Company | Dates)
                 User Data: {st.session_state.cv_data['raw_experience']}
-                EDUCATION ({st.session_state.cv_data['degree']}, {st.session_state.cv_data['university']}, {st.session_state.cv_data['grad_year']})
+                
+                EDUCATION 
+                - Degree: {st.session_state.cv_data.get('degree')}
+                - University: {st.session_state.cv_data.get('university')}
+                - College/Faculty: {st.session_state.cv_data.get('college')}
+                - Year: {st.session_state.cv_data.get('grad_year')}
+                
                 {optional_prompt}
                 LANGUAGES ({st.session_state.cv_data['languages']})
                 """
                 
                 generated_text = safe_generate(prompt_cv)
-                if "Error:" in generated_text:
-                    st.error(generated_text)
-                else:
-                    st.session_state.final_cv = generated_text
-                    st.rerun()
+                if "Error:" in generated_text: st.error(generated_text)
+                else: st.session_state.final_cv = generated_text; st.rerun()
 
         if st.session_state.final_cv:
-            st.text_area("Resume Editor (You can tweak text here before downloading)", st.session_state.final_cv, height=500)
-            
+            st.text_area("Resume Editor", st.session_state.final_cv, height=500)
             c1, c2, c3 = st.columns(3)
             c1.download_button("⬇️ Download PDF", create_pdf(st.session_state.final_cv), file_name, "application/pdf")
             c2.download_button("⬇️ Download Word", create_docx(st.session_state.final_cv), word_file_name, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-            if c3.button("🔄 Regenerate"):
-                st.session_state.final_cv = ""
-                st.rerun()
+            if c3.button("🔄 Regenerate"): st.session_state.final_cv = ""; st.rerun()
     
-    # --- TAB 2: Cover Letter ---
     with t2:
         if st.button("✨ Write Cover Letter"):
             with st.spinner("Writing..."):
                 prompt_cl = f"Write a professional cover letter for {st.session_state.cv_data['name']} applying for {st.session_state.cv_data['target_title']}."
                 st.session_state.cover_letter = safe_generate(prompt_cl)
                 st.rerun()
-
         if st.session_state.cover_letter:
             st.text_area("Cover Letter", st.session_state.cover_letter, height=400)
             st.download_button("⬇️ Download Letter", create_docx(st.session_state.cover_letter), "Cover_Letter.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     
-    # --- TAB 3: ATS Check ---
     with t3:
         if st.button("🔍 Check ATS Score"):
             with st.spinner("Analyzing..."):
@@ -482,9 +430,7 @@ elif st.session_state.step == 6:
                 prompt_ats = f"Analyze this CV against this Job/Role: {context}. Give a Score out of 100, list Missing Keywords, and suggest Improvements."
                 st.session_state.ats_analysis = safe_generate(prompt_ats)
                 st.rerun()
-
-        if st.session_state.ats_analysis:
-            st.write(st.session_state.ats_analysis)
+        if st.session_state.ats_analysis: st.write(st.session_state.ats_analysis)
 
     st.markdown("---")
     if st.button("Start Over"):
