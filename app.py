@@ -71,7 +71,6 @@ def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
 
-# --- UPDATED PARSER FUNCTION ---
 def parse_resume_with_ai(text):
     """Extract structured data including College/Faculty"""
     prompt = f"""
@@ -170,15 +169,22 @@ def create_pdf(text):
     for k, v in replacements.items(): text = text.replace(k, v)
     try: text = text.encode('latin-1', 'replace').decode('latin-1')
     except: text = text 
+    
+    # --- CORRECTED LOOP ---
     for line in text.split('\n'):
-        line = line.strip(); if not line: continue; if "___" in line: continue
+        line = line.strip()
+        if not line: continue
+        if "___" in line: continue
+        
         line_no_num = re.sub(r'^\d+\.\s*', '', line)
+        
         if line_no_num.isupper() and len(line_no_num) < 60 and "|" not in line:
             pdf.ln(6); pdf.set_font("Arial", 'B', size=12); pdf.cell(0, 6, line_no_num, ln=True, align='C'); x = pdf.get_x(); y = pdf.get_y(); pdf.line(x + 10, y, 200, y); pdf.ln(4)
         elif "|" in line and "@" in line: pdf.set_font("Arial", size=9); pdf.multi_cell(0, 5, line, align='C'); pdf.ln(4)
         elif "|" in line and "@" not in line: pdf.ln(4); pdf.set_font("Arial", 'B', size=10); pdf.cell(0, 6, line, ln=True, align='L'); pdf.ln(2)
         elif line.startswith('-'): pdf.set_font("Arial", size=10); clean_line = line.replace('-', '').strip(); pdf.multi_cell(0, 5, chr(149) + " " + clean_line); pdf.ln(2)
         else: pdf.set_font("Arial", size=10); pdf.multi_cell(0, 5, line); pdf.ln(1)
+    
     buffer = io.BytesIO(); pdf_output = pdf.output(dest='S').encode('latin-1'); buffer.write(pdf_output); buffer.seek(0)
     return buffer
 
@@ -254,7 +260,7 @@ if st.session_state.step == 1:
                     'portfolio':portfolio, 'github':github, 
                     'target_title':target_title, 
                     'university':university, 
-                    'college':college, # Saved here
+                    'college':college, 
                     'degree':degree, 
                     'grad_year':grad_year
                 })
