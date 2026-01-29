@@ -16,43 +16,52 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Sidebar: Configuration & API Key ---
+# --- 2. Sidebar & Hybrid API Logic ---
+# تعريف متغيرات الاتصال
+api_key = None
+using_shared_key = False
+
 with st.sidebar:
     st.title("⚙️ Configuration")
-    st.info("💡 **Tip:** This tool uses Groq's Llama 3.3 AI (Super Fast & Free).")
+    st.info("💡 **Tip:** This tool uses Groq's Llama 3.3 AI.")
     
-    # User can input their own key
-    user_api_key = st.text_input("🔑 Enter your Groq API Key (Optional)", type="password", help="If you have your own Groq Key, enter it here to avoid rate limits. Otherwise, the app uses the shared free quota.")
+    # --- Hybrid Logic Start ---
+    # خيار للمستخدم: يستخدم السيرفر المجاني ولا مفتاحه الخاص
+    use_own_key = st.checkbox("Use my own API Key (More Stability)", value=False)
     
+    if use_own_key:
+        user_input_key = st.text_input("🔑 Enter Groq API Key", type="password", help="Get it for free from console.groq.com")
+        if user_input_key:
+            api_key = user_input_key
+            using_shared_key = False
+    else:
+        # محاولة استخدام مفتاح السيرفر (مفتاحك أنت)
+        if "GROQ_API_KEY" in st.secrets:
+            api_key = st.secrets["GROQ_API_KEY"]
+            using_shared_key = True
+            st.success("✅ Connected via Shared Server")
+        else:
+            st.warning("⚠️ No Shared Key found in Secrets.")
+    # --- Hybrid Logic End ---
+
     st.markdown("---")
     st.markdown("""
     **How to use:**
     1. Fill in your **Personal Info**.
-    2. Add your **Skills** (Don't worry about formatting).
-    3. Paste your **Experience** (Simple bullet points work).
-    4. Provide a **Target Job Description** (Important for AI optimization).
-    5. Click **Generate** and download your ATS-ready CV!
+    2. Add your **Skills**.
+    3. Paste your **Experience** (Simple bullets).
+    4. Provide a **Target Job** (Optional).
+    5. Click **Generate**!
     """)
     st.markdown("---")
     st.caption("Developed by [Islam Nasser](https://www.linkedin.com/in/islam-nasser1/)")
 
-# 2. Connection Setup
-def get_groq_client():
-    api_key = None
-    # Priority 1: User provided key
-    if user_api_key:
-        api_key = user_api_key
-    # Priority 2: Secrets file (Developer's key)
-    elif "GROQ_API_KEY" in st.secrets:
-        api_key = st.secrets["GROQ_API_KEY"]
-    
-    if not api_key:
-        st.error("⚠️ No API Key found! Please enter a Groq API Key in the sidebar.")
-        st.stop()
-        
-    return Groq(api_key=api_key)
+# Check Connection
+if not api_key:
+    st.warning("⚠️ Please enter an API Key in the sidebar or configure secrets.")
+    st.stop()
 
-client = get_groq_client()
+client = Groq(api_key=api_key)
 MODEL_NAME = "llama-3.3-70b-versatile"
 
 # --- Helper Functions (Formatting) ---
@@ -358,8 +367,17 @@ elif st.session_state.step == 6:
                 
                 LANGUAGES ({st.session_state.cv_data['languages']})
                 """
-                st.session_state.final_cv = safe_generate(prompt_cv)
-                st.rerun()
+                
+                generated_text = safe_generate(prompt_cv)
+                
+                # Error Handling in UI
+                if "Error:" in generated_text:
+                    st.error(f"⚠️ AI Generation Failed: {generated_text}")
+                    if using_shared_key:
+                        st.info("💡 The shared server might be busy. Please check 'Use my own API Key' in the sidebar to proceed.")
+                else:
+                    st.session_state.final_cv = generated_text
+                    st.rerun()
 
         if st.session_state.final_cv:
             st.text_area("Editor (You can tweak text here before downloading)", st.session_state.final_cv, height=500)
