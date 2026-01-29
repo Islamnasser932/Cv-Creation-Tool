@@ -249,7 +249,7 @@ if st.session_state.step == 1:
         # --- UPDATED COLUMNS FOR COLLEGE ---
         c1, c2, c3, c4 = st.columns(4)
         with c1: university = st.text_input("University", st.session_state.cv_data.get('university', ''))
-        with c2: college = st.text_input("College/Faculty", st.session_state.cv_data.get('college', ''), placeholder="e.g. Faculty of Engineering")
+        with c2: college = st.text_input("College/Faculty", st.session_state.cv_data.get('college', ''))
         with c3: degree = st.text_input("Degree", st.session_state.cv_data.get('degree', ''))
         with c4: grad_year = st.text_input("Grad Year", st.session_state.cv_data.get('grad_year', ''))
 
@@ -441,3 +441,4 @@ elif st.session_state.step == 6:
     st.markdown("---")
     if st.button("Start Over"):
         st.session_state.step = 1; st.session_state.cv_data = {}; st.session_state.final_cv = ""; st.rerun()
+
