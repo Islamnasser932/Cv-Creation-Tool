@@ -9,7 +9,6 @@ import io
 import re
 import json
 from pypdf import PdfReader
-from streamlit_mic_recorder import mic_recorder
 
 # --- 1. إعدادات الصفحة ---
 st.set_page_config(
@@ -30,8 +29,8 @@ with st.sidebar:
     st.markdown("""
     **إزاي تعمل CV احترافي؟**
     1. **عندك CV قديم؟** ارفعه في الخطوة الأولى واحنا هنسحب البيانات منه!
-    2. **كسلان تكتب؟** استخدم "الفويس نوت" في خطوة الخبرة واحكي شغلك بصوتك.
-    3. **مش عارف تعبر؟** استخدم زرار "اقتراحات" واحنا هنكتبلك مهام احترافية.
+    2. **مش عارف تعبر؟** استخدم زرار "اقتراحات" في خطوة الخبرة واحنا هنكتبلك مهام احترافية.
+    3. **في الآخر:** نزل الـ CV وقدم وانت مطمن.
     """)
     
     st.divider()
@@ -60,22 +59,6 @@ client = Groq(api_key=api_key)
 MODEL_NAME = "llama-3.3-70b-versatile"
 
 # --- 3. دوال الذكاء الاصطناعي ومعالجة الملفات ---
-
-def transcribe_audio(audio_bytes):
-    """تحويل الصوت لنص باستخدام Groq Whisper"""
-    try:
-        audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = "recording.webm" # اسم وهمي عشان الـ API يقبله
-        
-        transcription = client.audio.transcriptions.create(
-            file=(audio_file.name, audio_file.read()),
-            model="whisper-large-v3",
-            response_format="text",
-            language="en" # ممكن تخليه "ar" لو عايز تتكلم عربي وهو يكتبه عربي
-        )
-        return transcription
-    except Exception as e:
-        return f"Error: {str(e)}"
 
 def extract_text_from_pdf(file):
     reader = PdfReader(file)
@@ -336,50 +319,34 @@ elif st.session_state.step == 2:
                 next_step(); st.rerun()
 
 # ==========================================
-# STEP 3: Experience (WITH VOICE & AI SUGGESTIONS)
+# STEP 3: Experience (AI SUGGESTIONS ONLY)
 # ==========================================
 elif st.session_state.step == 3:
     st.header("3️⃣ خبرة الشغل")
     
-    st.info("💡 عندك 3 طرق للكتابة: اكتب بإيدك، أو سجل فويس، أو خلي الذكاء الاصطناعي يقترح عليك.")
+    st.info("💡 مش عارف تكتب إيه؟ اكتب اسم الوظيفة تحت ودوس 'غششني'")
 
-    # --- أدوات المساعدة (فويس + اقتراحات) ---
-    with st.container():
-        c_voice, c_suggest = st.columns(2)
-        
-        # 1. Voice Input Section
-        with c_voice:
-            st.write("🎙️ **سجل فويس (إنجليزي أو عربي):**")
-            audio = mic_recorder(
-                start_prompt="بدء التسجيل ⏺️",
-                stop_prompt="إنهاء ⏹️", 
-                key='recorder',
-                format="webm"
-            )
-            
-            if audio:
-                with st.spinner("جاري تحويل الصوت لنص..."):
-                    transcribed_text = transcribe_audio(audio['bytes'])
+    # --- AI Suggestions Only ---
+    st.markdown("##### ✨ خليه يقترح عليك مهام:")
+    c_input, c_btn = st.columns([3, 1])
+    
+    with c_input:
+        # Default to target title if available
+        default_role = st.session_state.cv_data.get('target_title', '')
+        suggestion_role = st.text_input("اكتب مسمى وظيفي للاقتراح", value=default_role, label_visibility='collapsed', placeholder="مثلاً: Accountant")
+    
+    with c_btn:
+        if st.button("غششني مهام 🧠", use_container_width=True):
+            if suggestion_role:
+                with st.spinner("الذكاء الاصطناعي بيفكر..."):
+                    sugg = get_job_suggestions(suggestion_role)
                     current_text = st.session_state.cv_data.get('raw_experience', '')
-                    # إضافة النص الجديد للنص القديم
-                    st.session_state.cv_data['raw_experience'] = current_text + "\n" + transcribed_text
-                    st.success("تمت إضافة الكلام!")
+                    # إضافة الاقتراحات للنص الموجود
+                    st.session_state.cv_data['raw_experience'] = current_text + "\n" + sugg
+                    st.success("تمت الإضافة! كمل تعديل تحت.")
                     st.rerun()
-
-        # 2. AI Suggestions Section
-        with c_suggest:
-            st.write("✨ **أو خليه يقترح عليك:**")
-            role_name = st.session_state.cv_data.get('target_title', '')
-            if st.button("اقتراح مهام لـ " + (role_name if role_name else "وظيفتي")):
-                if role_name:
-                    with st.spinner("الذكاء الاصطناعي بيفكر..."):
-                        sugg = get_job_suggestions(role_name)
-                        current_text = st.session_state.cv_data.get('raw_experience', '')
-                        st.session_state.cv_data['raw_experience'] = current_text + "\n" + sugg
-                        st.success("تم إضافة الاقتراحات!")
-                        st.rerun()
-                else:
-                    st.warning("ارجع للخطوة 1 واكتب المسمى الوظيفي!")
+            else:
+                st.warning("اكتب اسم وظيفة الأول!")
     # ----------------------------------------
 
     with st.form("step3"):
