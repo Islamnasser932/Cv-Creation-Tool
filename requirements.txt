@@ -3,3 +3,4 @@ groq
 fpdf
 python-docx
 pypdf
+streamlit-mic-recorder
