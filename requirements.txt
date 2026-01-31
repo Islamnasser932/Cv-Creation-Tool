@@ -3,3 +3,5 @@ groq
 fpdf
 python-docx
 pypdf
+arabic-reshaper
+python-bidi
