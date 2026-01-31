@@ -139,14 +139,25 @@ def create_pdf(text):
         
         display_line = process_text_for_pdf(line.replace("### ", ""))
         
+# HEADERS (Section Titles like EXPERIENCE)
         if line.startswith("### "):
-            pdf.ln(4)
-            pdf.set_font('Amiri-Bold', '', 14)
+            pdf.ln(5) # مسافة قبل العنوان
+            
+            # هنا التعديل: تأكد إن اسم الخط Amiri-Bold وحجمه 14 أو 15
+            pdf.set_font('Amiri-Bold', '', 15) 
+            pdf.set_text_color(*PRIMARY_COLOR) # لون أسود
+            
+            # كتابة العنوان
             pdf.cell(0, 8, display_line.upper(), ln=True, align='L')
+            
+            # الخط الفاصل (Thick Line)
+            pdf.set_draw_color(0, 0, 0)
             pdf.set_line_width(0.5) 
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-            pdf.set_line_width(0.2)
-            pdf.ln(3)
+            pdf.set_line_width(0.2) # نرجع الخط رفيع تاني
+            
+            pdf.ln(3) # مسافة بعد العنوان
+            pdf.set_text_color(*TEXT_COLOR)
             
         elif "|" in line and not line.startswith("-") and not line.startswith("•"):
             pdf.ln(1)
@@ -439,3 +450,4 @@ elif st.session_state.step == 6:
 
     st.markdown("---"); 
     if st.button("Start Over"): st.session_state.step = 1; st.session_state.cv_data = {}; st.session_state.final_cv = ""; st.rerun()
+
