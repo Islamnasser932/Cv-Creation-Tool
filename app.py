@@ -83,12 +83,15 @@ def process_text_for_pdf(text):
     except: return text
 
 def extract_text_from_pdf(file):
-    reader = PdfReader(file); text = ""; 
-    for page in reader.pages: text += page.extract_text()
+    reader = PdfReader(file)
+    text = "" 
+    for page in reader.pages: 
+        text += page.extract_text()
     return text
 
 def extract_text_from_docx(file):
-    doc = Document(file); return "\n".join([para.text for para in doc.paragraphs])
+    doc = Document(file)
+    return "\n".join([para.text for para in doc.paragraphs])
 
 def parse_resume_with_ai(text):
     prompt = f"""
@@ -144,37 +147,55 @@ def create_docx(text):
     
     text = text.replace("**", "").replace("##", "")
     for line in text.split('\n'):
-        line = line.strip(); if not line: continue
+        line = line.strip()
+        if not line: continue
+        
         line_no_num = re.sub(r'^\d+\.\s*', '', line)
         
         # Header Detection
         if line_no_num.isupper() and len(line_no_num) < 60 and "|" not in line:
             p = doc.add_paragraph()
-            p.paragraph_format.space_before = Pt(12); p.paragraph_format.space_after = Pt(6)
-            run = p.add_run(line_no_num); run.bold = True; run.font.size = Pt(12)
+            p.paragraph_format.space_before = Pt(12)
+            p.paragraph_format.space_after = Pt(6)
+            run = p.add_run(line_no_num)
+            run.bold = True
+            run.font.size = Pt(12)
             p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER if "NAME" not in line else WD_PARAGRAPH_ALIGNMENT.LEFT
         elif "|" in line and "@" in line:
-            p = doc.add_paragraph(line); p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            p = doc.add_paragraph(line)
+            p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         elif "|" in line and "@" not in line: # Experience/Edu Header line
-            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(8)
-            run = p.add_run(line); run.bold = True; p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(8)
+            run = p.add_run(line)
+            run.bold = True
+            p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
         elif line.startswith('-') or line.startswith('•'):
             p = doc.add_paragraph(line.replace('-', '').replace('•', '').strip(), style='List Bullet')
         else:
             p = doc.add_paragraph(line)
     
-    buffer = io.BytesIO(); doc.save(buffer); buffer.seek(0)
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
     return buffer
 
 def create_pdf(text):
     class PDF(FPDF):
         def header(self): pass
         def footer(self): pass
-    pdf = PDF(); pdf.add_page(); pdf.add_font('Amiri', '', FONT_PATH, uni=True); pdf.set_font('Amiri', '', 11)
+    
+    pdf = PDF()
+    pdf.add_page()
+    pdf.add_font('Amiri', '', FONT_PATH, uni=True)
+    pdf.set_font('Amiri', '', 11)
     
     text = text.replace("**", "").replace("##", "")
     for line in text.split('\n'):
-        line = line.strip(); if not line: continue; if "___" in line: continue
+        line = line.strip()
+        # تصحيح الخطأ هنا (فصل الأوامر في أسطر منفصلة)
+        if not line: continue
+        if "___" in line: continue
         
         line = process_text_for_pdf(line)
         line_no_num = re.sub(r'^\d+\.\s*', '', line)
@@ -184,20 +205,36 @@ def create_pdf(text):
              if re.search(r'[A-Z]', line) and line.isupper(): is_header = True
 
         if is_header:
-            pdf.ln(6); pdf.set_font("Amiri", '', 13); pdf.cell(0, 6, line, ln=True, align='C')
-            x = pdf.get_x(); y = pdf.get_y(); pdf.line(10, y, 200, y); pdf.ln(4); pdf.set_font("Amiri", '', 11)
+            pdf.ln(6)
+            pdf.set_font("Amiri", '', 13)
+            pdf.cell(0, 6, line, ln=True, align='C')
+            x = pdf.get_x()
+            y = pdf.get_y()
+            pdf.line(10, y, 200, y)
+            pdf.ln(4)
+            pdf.set_font("Amiri", '', 11)
         elif "|" in line and "@" in line: # Contact
-            pdf.set_font("Amiri", '', 10); pdf.multi_cell(0, 5, line, align='C'); pdf.ln(4)
-        elif "|" in line and "@" not in line: # Edu/Exp Titles (Bold-ish)
-            pdf.ln(4); pdf.set_font("Amiri", '', 11); pdf.cell(0, 6, line, ln=True, align='L'); pdf.ln(2)
+            pdf.set_font("Amiri", '', 10)
+            pdf.multi_cell(0, 5, line, align='C')
+            pdf.ln(4)
+        elif "|" in line and "@" not in line: # Edu/Exp Titles
+            pdf.ln(4)
+            pdf.set_font("Amiri", '', 11)
+            pdf.cell(0, 6, line, ln=True, align='L')
+            pdf.ln(2)
         elif line.startswith('-') or line.startswith('•'):
             pdf.set_font("Amiri", '', 11)
             clean_line = line.replace('-', '').replace('•', '').strip()
-            pdf.multi_cell(0, 5, "• " + clean_line, align='L'); pdf.ln(2)
+            pdf.multi_cell(0, 5, "• " + clean_line, align='L')
+            pdf.ln(2)
         else:
-            pdf.set_font("Amiri", '', 11); pdf.multi_cell(0, 5, line, align='L'); pdf.ln(1)
+            pdf.set_font("Amiri", '', 11)
+            pdf.multi_cell(0, 5, line, align='L')
+            pdf.ln(1)
             
-    buffer = io.BytesIO(); buffer.write(pdf.output(dest='S').encode("latin1")); buffer.seek(0)
+    buffer = io.BytesIO()
+    buffer.write(pdf.output(dest='S').encode("latin1"))
+    buffer.seek(0)
     return buffer
 
 # ==========================================
@@ -337,18 +374,12 @@ elif st.session_state.step == 6:
                 # 2. Education (Formatted Horizontally)
                 edu_block = ""
                 if any(st.session_state.cv_data.get(k) for k in ['university', 'college', 'degree', 'grad_year']):
-                    # Build list: Degree, College, University
                     edu_parts = []
                     if st.session_state.cv_data.get('degree'): edu_parts.append(st.session_state.cv_data['degree'])
                     if st.session_state.cv_data.get('college'): edu_parts.append(st.session_state.cv_data['college'])
                     if st.session_state.cv_data.get('university'): edu_parts.append(st.session_state.cv_data['university'])
-                    
-                    # Join with comma
                     edu_str = ", ".join(edu_parts)
-                    # Add Year with pipe separator
-                    if st.session_state.cv_data.get('grad_year'):
-                        edu_str += f" | {st.session_state.cv_data['grad_year']}"
-                    
+                    if st.session_state.cv_data.get('grad_year'): edu_str += f" | {st.session_state.cv_data['grad_year']}"
                     edu_block = f"EDUCATION\n{edu_str}\n"
 
                 # 3. Extras
