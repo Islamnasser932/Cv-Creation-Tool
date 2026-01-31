@@ -24,7 +24,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. FONT SETUP (ROBUST CHECK)
+# 2. FONT SETUP
 # ==========================================
 FONT_URL = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
 FONT_BOLD_URL = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Bold.ttf"
@@ -32,41 +32,29 @@ FONT_PATH = "Amiri-Regular.ttf"
 FONT_BOLD_PATH = "Amiri-Bold.ttf"
 
 def check_and_download_font():
-    # Check Regular
     if not os.path.exists(FONT_PATH) or os.path.getsize(FONT_PATH) < 1000:
-        with st.spinner("Downloading Regular Font..."):
-            try:
-                response = requests.get(FONT_URL, timeout=10)
-                if response.status_code == 200:
-                    with open(FONT_PATH, "wb") as f: f.write(response.content)
-            except: st.error("Could not download Regular font. Check internet.")
-
-    # Check Bold
+        try:
+            r = requests.get(FONT_URL); open(FONT_PATH, "wb").write(r.content)
+        except: pass
     if not os.path.exists(FONT_BOLD_PATH) or os.path.getsize(FONT_BOLD_PATH) < 1000:
-        with st.spinner("Downloading Bold Font..."):
-            try:
-                response = requests.get(FONT_BOLD_URL, timeout=10)
-                if response.status_code == 200:
-                    with open(FONT_BOLD_PATH, "wb") as f: f.write(response.content)
-            except: st.error("Could not download Bold font. Check internet.")
+        try:
+            r = requests.get(FONT_BOLD_URL); open(FONT_BOLD_PATH, "wb").write(r.content)
+        except: pass
 
 check_and_download_font()
 
 # ==========================================
-# 3. API SETUP
+# 3. API & SIDEBAR
 # ==========================================
 api_key = None
-if "GROQ_API_KEY" in st.secrets:
-    api_key = st.secrets["GROQ_API_KEY"]
+if "GROQ_API_KEY" in st.secrets: api_key = st.secrets["GROQ_API_KEY"]
 
 with st.sidebar:
     st.title("🎨 Elite CV Builder")
-    st.success("System Ready 🟢")
     use_own_key = st.checkbox("Use my own API Key")
     if use_own_key: api_key = st.text_input("Groq API Key", type="password")
 
-if not api_key: st.warning("⚠️ Please configure the API Key."); st.stop()
-
+if not api_key: st.stop()
 client = Groq(api_key=api_key)
 MODEL_NAME = "llama-3.3-70b-versatile"
 
@@ -87,11 +75,9 @@ def extract_text_from_docx(file):
     doc = Document(file); return "\n".join([para.text for para in doc.paragraphs])
 
 def parse_resume_with_ai(text):
-    prompt = f"""You are a Data Extraction Assistant. Extract resume details from the text below.
-    Source Text: {text[:6000]} 
-    Output ONLY valid JSON with keys: "name", "email", "phone", "city", "linkedin", "target_title", "skills", "experience", "education_list" (array of objects with uni, col, deg, year)."""
+    prompt = f"Extract details. Source: {text[:6000]}. Output JSON: name, email, phone, city, linkedin, portfolio, github, target_title, skills, experience, education_list."
     try:
-        completion = client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], temperature=0.1, response_format={"type": "json_object"})
+        completion = client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], response_format={"type": "json_object"})
         return json.loads(completion.choices[0].message.content)
     except: return None
 
@@ -103,130 +89,124 @@ def get_job_suggestions(role_title):
 
 def safe_generate(prompt_text):
     try:
-        completion = client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "system", "content": "You are a Professional Resume Writer. Output clean text."}, {"role": "user", "content": prompt_text}], temperature=0.3)
+        completion = client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "system", "content": "You are a Resume Expert."}, {"role": "user", "content": prompt_text}], temperature=0.3)
         return completion.choices[0].message.content
     except Exception as e: return f"Error: {str(e)}"
 
 # ==========================================
 # 5. PROFESSIONAL PDF GENERATOR (FIXED)
 # ==========================================
-# --- COLORS SET TO BLACK ---
-PRIMARY_COLOR = (0, 0, 0)    # Pure Black
-SECONDARY_COLOR = (0, 0, 0)  # Pure Black for contact info too
-TEXT_COLOR = (0, 0, 0)       # Pure Black
-
 class ProfessionalPDF(FPDF):
     def header(self): pass 
 
 def create_pdf(text):
-    # A4 width is 210mm. Set margins to 10mm on sides giving 190mm usable width.
+    # Reduced margins to fit long links (Left/Right = 8mm)
     pdf = ProfessionalPDF(orientation='P', unit='mm', format='A4')
-    pdf.set_margins(left=10, top=15, right=10) 
+    pdf.set_margins(left=8, top=10, right=8) 
     pdf.add_page()
     
+    # Safe Font Loading
     try:
         pdf.add_font('Amiri', '', FONT_PATH, uni=True)
         pdf.add_font('Amiri-Bold', '', FONT_BOLD_PATH, uni=True)
     except:
-        st.error("Font error. Re-downloading..."); check_and_download_font()
-        pdf.add_font('Amiri', '', FONT_PATH, uni=True); pdf.add_font('Amiri-Bold', '', FONT_BOLD_PATH, uni=True)
+        pdf.add_font('Arial', '', '', uni=True) # Fallback
 
-    # --- 1. HEADER (Name & Contact) ---
-    pdf.set_font('Amiri-Bold', '', 24)
-    pdf.set_text_color(*PRIMARY_COLOR)
+    # --- 1. HEADER ---
     lines = text.split('\n')
+    
+    # Remove any "CONTACT INFORMATION" header artifact
+    clean_lines = [l for l in lines if "CONTACT INFORMATION" not in l.upper()]
+    lines = clean_lines
+
+    # Name
     name = lines[0].strip()
-    # Use full width for name centering
+    pdf.set_font('Amiri-Bold', '', 22) # Big Name
+    pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, process_text_for_pdf(name), ln=True, align='C')
     
+    # Contact Info (Smaller font to fit links)
     if len(lines) > 1:
-        pdf.set_font('Amiri', '', 10)
-        pdf.set_text_color(*SECONDARY_COLOR)
+        pdf.set_font('Amiri', '', 9) # Smaller font for links
         contact = lines[1].strip()
-        # Multi_cell for contact line to wrap if absolutely necessary, though 190mm is usually enough
-        pdf.multi_cell(0, 6, process_text_for_pdf(contact), align='C')
-        pdf.ln(4)
+        pdf.multi_cell(0, 5, process_text_for_pdf(contact), align='C')
+        pdf.ln(2)
         
-        pdf.set_draw_color(*PRIMARY_COLOR)
-        pdf.set_line_width(0.3) # Thinner line
+        # Line Separator
+        pdf.set_draw_color(0, 0, 0)
+        pdf.set_line_width(0.4)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(8) # More space after header line
+        pdf.ln(5)
 
-    # --- 2. BODY CONTENT ---
-    pdf.set_text_color(*TEXT_COLOR)
-    
+    # --- 2. BODY ---
     for line in lines[2:]: 
         line = line.strip()
         if not line: continue
-        display_line = process_text_for_pdf(line.replace("### ", "")) # Remove marker for display
         
-        # --- STYLE LOGIC (Using ### marker for headers) ---
+        display_line = process_text_for_pdf(line.replace("### ", ""))
+        
+        # SECTION HEADERS
         if line.startswith("### "):
-            pdf.ln(5) # Extra space before section
-            pdf.set_font('Amiri-Bold', '', 13)
-            pdf.set_text_color(*PRIMARY_COLOR)
-            pdf.cell(0, 8, display_line.upper(), ln=True, align='L')
-            # Section Underline
-            pdf.set_draw_color(0, 0, 0)
+            pdf.ln(3)
+            pdf.set_font('Amiri-Bold', '', 12)
+            pdf.cell(0, 7, display_line.upper(), ln=True, align='L')
+            # Underline
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-            pdf.ln(3) # Space after section header
-            pdf.set_text_color(*TEXT_COLOR)
-            
-        # SUB-HEADERS (Role | Company - Bold but no line)
-        elif "|" in line and not line.startswith("-") and not line.startswith("•"):
             pdf.ln(2)
-            pdf.set_font('Amiri-Bold', '', 11)
-            pdf.cell(0, 6, display_line, ln=True)
-            pdf.ln(1)
             
-        # BULLET POINTS
+        # SUB-HEADERS (Jobs/Projects) - Bold
+        elif "|" in line and not line.startswith("-") and not line.startswith("•"):
+            pdf.ln(1)
+            pdf.set_font('Amiri-Bold', '', 10)
+            pdf.cell(0, 5, display_line, ln=True)
+            
+        # BULLETS
         elif line.startswith("-") or line.startswith("•"):
             pdf.set_font('Amiri', '', 10)
             clean_line = line.replace("-", "").replace("•", "").strip()
-            current_x = pdf.get_x()
-            pdf.set_x(current_x + 5) # Indent
-            # Use multi_cell width to ensure wrapping fits margins
-            pdf.multi_cell(185, 6, "• " + process_text_for_pdf(clean_line))
-            pdf.set_x(current_x) # Reset X
-            pdf.ln(1) # Small spacing between bullets
+            pdf.set_x(12) 
+            pdf.multi_cell(190, 5, "• " + process_text_for_pdf(clean_line))
             
-        # NORMAL TEXT (Summary, etc.)
+        # NORMAL TEXT (Skills paragraph / Summary)
         else:
             pdf.set_font('Amiri', '', 10)
-            pdf.multi_cell(0, 6, display_line)
-            pdf.ln(2) # Space after paragraphs
+            pdf.multi_cell(0, 5, display_line)
+            pdf.ln(1)
 
-    buffer = io.BytesIO(); buffer.write(pdf.output(dest='S').encode("latin1")); buffer.seek(0)
+    buffer = io.BytesIO()
+    buffer.write(pdf.output(dest='S').encode("latin1"))
+    buffer.seek(0)
     return buffer
 
-# DOCX generator adjusted for black color
 def create_docx(text):
     doc = Document()
     style = doc.styles['Normal']; style.font.name = 'Arial'; style.font.size = Pt(10)
     lines = text.split('\n')
+    clean_lines = [l for l in lines if "CONTACT INFORMATION" not in l.upper()]
     
+    # Header
     head = doc.add_paragraph(); head.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-    run = head.add_run(lines[0]); run.bold = True; run.font.size = Pt(20); run.font.color.rgb = RGBColor(0, 0, 0)
+    run = head.add_run(clean_lines[0]); run.bold = True; run.font.size = Pt(20)
     
-    if len(lines) > 1:
-        contact = doc.add_paragraph(lines[1]); contact.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        contact.runs[0].font.size = Pt(10); contact.runs[0].font.color.rgb = RGBColor(0, 0, 0)
+    if len(clean_lines) > 1:
+        contact = doc.add_paragraph(clean_lines[1]); contact.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        contact.runs[0].font.size = Pt(9)
 
-    for line in lines[2:]:
-        line = line.strip()
+    for line in clean_lines[2:]:
+        line = line.strip(); 
         if not line: continue
-        clean_line = line.replace("### ", "")
         
         if line.startswith("### "):
-            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(14); p.paragraph_format.space_after = Pt(4)
-            run = p.add_run(clean_line.upper()); run.bold = True; run.font.size = Pt(12); run.font.color.rgb = RGBColor(0, 0, 0)
+            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(12)
+            run = p.add_run(line.replace("### ", "").upper()); run.bold = True; run.font.size = Pt(12)
         elif "|" in line and not line.startswith("-"):
-            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(8)
-            run = p.add_run(clean_line); run.bold = True
+            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(6)
+            run = p.add_run(line); run.bold = True
         elif line.startswith("-") or line.startswith("•"):
-            p = doc.add_paragraph(clean_line.replace("-", "").replace("•", "").strip(), style='List Bullet')
+            doc.add_paragraph(line.replace("-", "").replace("•", "").strip(), style='List Bullet')
         else:
-            doc.add_paragraph(clean_line)
+            doc.add_paragraph(line)
+            
     buffer = io.BytesIO(); doc.save(buffer); buffer.seek(0)
     return buffer
 
@@ -252,29 +232,37 @@ if st.session_state.step < 6: st.progress(st.session_state.step / 6)
 
 # STEP 1
 if st.session_state.step == 1:
-    st.header("1️⃣ Personal Info & Education")
-    with st.expander("📄 Auto-Fill from Old CV"):
-        f = st.file_uploader("PDF/Word", type=['pdf', 'docx'])
-        if f and st.button("Extract Data"):
+    st.header("1️⃣ Personal Info")
+    with st.expander("📄 Auto-Fill"):
+        f = st.file_uploader("Upload PDF/Word", type=['pdf', 'docx'])
+        if f and st.button("Extract"):
             with st.spinner("Processing..."):
                 try:
                     text = extract_text_from_pdf(f) if f.name.endswith('.pdf') else extract_text_from_docx(f)
                     data = parse_resume_with_ai(text)
                     if data: 
                         st.session_state.cv_data.update({k:v for k,v in data.items() if k != 'education_list'})
-                        if 'education_list' in data and isinstance(data['education_list'], list): st.session_state.cv_data['education_entries'] = data['education_list']
-                        st.success("Extracted!"); st.rerun()
-                except: st.error("Error parsing.")
+                        if 'education_list' in data: st.session_state.cv_data['education_entries'] = data['education_list']
+                        st.success("Done!"); st.rerun()
+                except: st.error("Error.")
 
     with st.form("s1"):
         c1, c2 = st.columns(2)
-        with c1: name = st.text_input("Name", st.session_state.cv_data.get('name', '')); email = st.text_input("Email", st.session_state.cv_data.get('email', '')); city = st.text_input("City", st.session_state.cv_data.get('city', ''))
-        with c2: phone = st.text_input("Phone", st.session_state.cv_data.get('phone', '')); linkedin = st.text_input("LinkedIn", st.session_state.cv_data.get('linkedin', '')); github = st.text_input("GitHub", st.session_state.cv_data.get('github', '')); portfolio = st.text_input("Portfolio", st.session_state.cv_data.get('portfolio', ''))
+        with c1: 
+            name = st.text_input("Name", st.session_state.cv_data.get('name', ''))
+            email = st.text_input("Email", st.session_state.cv_data.get('email', ''))
+            city = st.text_input("City", st.session_state.cv_data.get('city', ''))
+            portfolio = st.text_input("Portfolio Link", st.session_state.cv_data.get('portfolio', ''))
+        with c2: 
+            phone = st.text_input("Phone", st.session_state.cv_data.get('phone', ''))
+            linkedin = st.text_input("LinkedIn", st.session_state.cv_data.get('linkedin', ''))
+            github = st.text_input("GitHub", st.session_state.cv_data.get('github', ''))
+        
         st.markdown("---"); target_title = st.text_input("🔴 Target Job Title", st.session_state.cv_data.get('target_title', ''))
         st.write(""); submitted = st.form_submit_button("Save Info")
         if submitted: st.session_state.cv_data.update({'name':name, 'email':email, 'phone':phone, 'linkedin':linkedin, 'city':city, 'portfolio':portfolio, 'github':github, 'target_title':target_title})
 
-    st.markdown("### 🎓 Education"); st.info("Format: Degree, College, University | Year")
+    st.markdown("### 🎓 Education"); 
     for i, entry in enumerate(st.session_state.cv_data['education_entries']):
         with st.container(border=True):
             cols = st.columns([3, 3, 3, 2, 1])
@@ -285,16 +273,18 @@ if st.session_state.step == 1:
             with cols[4]: st.write(""); 
             if st.button("🗑️", key=f"del_edu_{i}"): st.session_state.cv_data['education_entries'].pop(i); st.rerun()
     if st.button("➕ Add Education"): st.session_state.cv_data['education_entries'].append({'uni': '', 'col': '', 'deg': '', 'year': ''}); st.rerun()
+    
     st.markdown("---")
     if st.button("Next Step ➡️"):
         if st.session_state.cv_data.get('name') and st.session_state.cv_data.get('target_title'): next_step(); st.rerun()
-        else: st.warning("Please fill Name and Target Job Title!")
+        else: st.warning("Name & Job Title required!")
 
 # STEP 2
 elif st.session_state.step == 2:
     st.header("2️⃣ Skills")
     with st.form("s2"):
-        skills = st.text_area("Skills", st.session_state.cv_data.get('skills', '')); langs = st.text_input("Languages", st.session_state.cv_data.get('languages', ''))
+        skills = st.text_area("Skills", st.session_state.cv_data.get('skills', ''))
+        langs = st.text_input("Languages", st.session_state.cv_data.get('languages', ''))
         c1, c2 = st.columns([1, 5]); 
         with c1: 
             if st.form_submit_button("Back"): prev_step(); st.rerun()
@@ -372,11 +362,12 @@ elif st.session_state.step == 6:
     
     with t1:
         if not st.session_state.final_cv:
-            with st.spinner("Enhancing & Formatting (Adding Metrics)..."):
-                # Data Compilation
-                info = [st.session_state.cv_data[k] for k in ['phone', 'city', 'email', 'linkedin', 'github', 'portfolio'] if st.session_state.cv_data.get(k)]
+            with st.spinner("Compiling Resume..."):
+                # Contact Line (Include Portfolio/GitHub)
+                info = [st.session_state.cv_data[k] for k in ['phone', 'city', 'email', 'linkedin', 'portfolio', 'github'] if st.session_state.cv_data.get(k)]
                 c_line = " | ".join(info)
                 
+                # Education
                 edu_lines = []
                 for e in st.session_state.cv_data['education_entries']:
                     if e.get('uni') or e.get('col'):
@@ -386,6 +377,7 @@ elif st.session_state.step == 6:
                         edu_lines.append(f"- {line}")
                 edu_block = "### EDUCATION\n" + "\n".join(edu_lines) if edu_lines else ""
 
+                # Projects
                 proj_lines = []
                 for p in st.session_state.cv_data['project_entries']:
                     if p.get('title'):
@@ -394,35 +386,30 @@ elif st.session_state.step == 6:
                         proj_lines.append(f"{head}\n{p.get('desc','')}")
                 proj_block = "### PROJECTS\n" + "\n\n".join(proj_lines) + "\n" if proj_lines else ""
 
-                cert_lines = []
-                for c in st.session_state.cv_data['cert_entries']:
-                    if c.get('title'): cert_lines.append(f"- {c['title']} | {c.get('auth','')}")
+                # Certs & Vol
+                cert_lines = [f"- {c['title']} | {c.get('auth','')}" for c in st.session_state.cv_data['cert_entries'] if c.get('title')]
                 cert_block = "### CERTIFICATIONS\n" + "\n".join(cert_lines) + "\n" if cert_lines else ""
-
-                vol_lines = []
-                for v in st.session_state.cv_data['vol_entries']:
-                    if v.get('role'): vol_lines.append(f"{v['role']} | {v.get('org','')}\n{v.get('desc','')}")
+                
+                vol_lines = [f"{v['role']} | {v.get('org','')}\n{v.get('desc','')}" for v in st.session_state.cv_data['vol_entries'] if v.get('role')]
                 vol_block = "### VOLUNTEERING\n" + "\n\n".join(vol_lines) + "\n" if vol_lines else ""
                 
                 langs = f"### LANGUAGES\n- {st.session_state.cv_data['languages']}" if st.session_state.cv_data.get('languages') else ""
 
-                # --- THE CRITICAL PROMPT UPDATE ---
+                # PROMPT FIX: Force Comma Separated Skills & No Header Text
                 prompt = f"""
-                Act as an Expert Resume Writer. Rewrite into HIGH-IMPACT, ATS-Optimized English Resume.
+                Act as a Resume Expert. Rewrite in Professional ENGLISH.
                 
-                **RULES:**
-                1. **Translate** ALL to English.
-                2. **ADD METRICS:** For every experience role/bullet point, YOU MUST INVENT realistic numbers, percentages, or dollar amounts to show impact (e.g., "Increased sales by 30%", "Reduced processing time by 2 days"). Do not just list duties.
-                3. **Dates:** Standardize ALL dates to "Mon YYYY - Mon YYYY" or "Mon YYYY - Present".
-                4. **Formatting:** Use "### " prefix for Main Headers ONLY (e.g., ### EXPERIENCE). Do NOT use markdown bold (**).
-                5. **Languages:** Just list them as bullets, do not put them in uppercase.
-
-                DATA:
+                CRITICAL RULES:
+                1. **SKILLS:** Write technical skills as a **COMMA-SEPARATED PARAGRAPH**. Do NOT use bullet points or vertical lists.
+                2. **NO HEADER:** Do NOT write "CONTACT INFORMATION" at the top. Just start with the name.
+                3. **METRICS:** Invent realistic numbers for Experience duties.
+                4. **CLEAN:** No markdown bold (**). Use "### " ONLY for main section headers (EXPERIENCE, EDUCATION, etc).
+                
                 {st.session_state.cv_data['name'].upper()}
                 {c_line}
                 
                 ### PROFESSIONAL SUMMARY
-                (Write a powerful summary tailored for {st.session_state.cv_data['target_title']} mentioning key strengths)
+                (Write summary for {st.session_state.cv_data['target_title']})
                 
                 ### TECHNICAL SKILLS
                 {st.session_state.cv_data['skills']}
@@ -441,9 +428,9 @@ elif st.session_state.step == 6:
                 else: st.session_state.final_cv = res; st.rerun()
 
         if st.session_state.final_cv:
-            st.text_area("Editor (You can edit before downloading)", st.session_state.final_cv, height=500)
+            st.text_area("Editor", st.session_state.final_cv, height=500)
             c1, c2, c3 = st.columns(3)
-            c1.download_button("PDF (Black & Pro)", create_pdf(st.session_state.final_cv), f"{safe_name}.pdf", "application/pdf")
+            c1.download_button("PDF", create_pdf(st.session_state.final_cv), f"{safe_name}.pdf", "application/pdf")
             c2.download_button("Word", create_docx(st.session_state.final_cv), f"{safe_name}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             if c3.button("Reset"): st.session_state.final_cv=""; st.rerun()
 
@@ -461,5 +448,5 @@ elif st.session_state.step == 6:
                 st.session_state.ats_analysis = ats_res; st.rerun()
         if st.session_state.ats_analysis: st.info("ATS Result:"); st.write(st.session_state.ats_analysis)
 
-    st.markdown("---")
+    st.markdown("---"); 
     if st.button("Start Over"): st.session_state.step = 1; st.session_state.cv_data = {}; st.session_state.final_cv = ""; st.rerun()
