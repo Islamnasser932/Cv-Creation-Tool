@@ -9,9 +9,9 @@ import io
 import re
 import json
 from pypdf import PdfReader
-import requests # عشان نحمل الخط
-import arabic_reshaper # عشان يشبك الحروف
-from bidi.algorithm import get_display # عشان يظبط الاتجاه من اليمين للشمال
+import requests
+import arabic_reshaper
+from bidi.algorithm import get_display
 
 # --- 1. Page Configuration ---
 st.set_page_config(
@@ -21,14 +21,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 2. Auto-Download Arabic Font ---
-# بنحمل خط "Amiri" عشان هو ممتاز في العربي والإنجليزي مع بعض
+# --- 2. Auto-Download Font (Support for any accidental unicode) ---
 FONT_URL = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
 FONT_PATH = "Amiri-Regular.ttf"
 
 def check_and_download_font():
     if not os.path.exists(FONT_PATH):
-        with st.spinner("Downloading Arabic Font support..."):
+        with st.spinner("Setting up fonts..."):
             response = requests.get(FONT_URL)
             with open(FONT_PATH, "wb") as f:
                 f.write(response.content)
@@ -44,10 +43,9 @@ with st.sidebar:
     st.title("💡 Quick Guide")
     
     st.markdown("""
-    **How to build a world-class CV:**
-    1. **Have an old CV?** Upload it in Step 1 to auto-fill.
-    2. **Writer's Block?** Use "Get Suggestions" in Step 3.
-    3. **Finish:** Download your ATS-optimized Resume.
+    **Rules:**
+    * **Input:** You can write in **Arabic** or **English**.
+    * **Output:** The final CV will ALWAYS be in **Professional English**.
     """)
     
     st.divider()
@@ -67,9 +65,8 @@ with st.sidebar:
             else:
                 st.warning("⚠️ No API Key found.")
 
-# Validate Connection
 if not api_key:
-    st.warning("⚠️ Please configure the API Key in the sidebar to proceed.")
+    st.warning("⚠️ Please configure the API Key in the sidebar.")
     st.stop()
 
 client = Groq(api_key=api_key)
@@ -77,13 +74,10 @@ MODEL_NAME = "llama-3.3-70b-versatile"
 
 # --- 4. Helper Functions ---
 
-# دالة لمعالجة النص العربي (تشبيك الحروف + عكس الاتجاه)
 def process_text_for_pdf(text):
     if not text: return ""
     try:
-        # Reshape: بيخلي الحروف تشبك في بعض (ل -> لـ)
         reshaped_text = arabic_reshaper.reshape(text)
-        # Bidi: بيخلي الكلام من اليمين للشمال
         bidi_text = get_display(reshaped_text)
         return bidi_text
     except:
@@ -100,17 +94,22 @@ def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
 
+# --- UPDATED: Parser now forces English Output ---
 def parse_resume_with_ai(text):
     prompt = f"""
-    Extract the following details from this resume text:
-    Name, Email, Phone, City, LinkedIn, Target Job Title (infer if not present), 
-    Skills (comma-separated), Experience (raw text),
-    University, College (Faculty), Degree, and Graduation Year.
+    You are a Data Extraction Assistant.
     
-    Resume Text:
+    Task: Extract resume details and TRANSLATE everything to English immediately.
+    
+    Source Text:
     {text[:4000]} 
     
-    Output ONLY a valid JSON object with these keys: 
+    Rules:
+    1. If source is Arabic (e.g., "القاهرة"), output "Cairo".
+    2. If source is "طالب", output "Student".
+    3. Translate extracted Skills and Experience to English.
+    
+    Output ONLY valid JSON with keys: 
     "name", "email", "phone", "city", "linkedin", "target_title", "skills", "experience", 
     "university", "college", "degree", "grad_year".
     """
@@ -146,7 +145,7 @@ def safe_generate(prompt_text):
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": "You are a Senior HR Recruiter. Output strict, clean text. Do NOT use markdown bold (**). Do NOT number the sections."},
+                {"role": "system", "content": "You are a Senior HR Recruiter. Output strict, clean text."},
                 {"role": "user", "content": prompt_text}
             ],
             temperature=0.3,
@@ -187,7 +186,6 @@ def create_docx(text):
     buffer = io.BytesIO(); doc.save(buffer); buffer.seek(0)
     return buffer
 
-# --- UPDATED PDF FUNCTION FOR ARABIC ---
 def create_pdf(text):
     class PDF(FPDF):
         def header(self): pass
@@ -196,11 +194,8 @@ def create_pdf(text):
     pdf = PDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
-    
-    # 1. تسجيل الخط العربي الذي قمنا بتحميله
-    # بنسميه 'Amiri' وبنقوله إن ده خط Unicode
     pdf.add_font('Amiri', '', FONT_PATH, uni=True)
-    pdf.set_font('Amiri', '', 11) # استخدام الخط كـ Default
+    pdf.set_font('Amiri', '', 11)
     
     text = text.replace("**", "").replace("##", "")
     
@@ -209,72 +204,41 @@ def create_pdf(text):
         if not line: continue
         if "___" in line: continue
         
-        # معالجة النص العربي قبل الكتابة
         line = process_text_for_pdf(line)
+        line_no_num = re.sub(r'^\d+\.\s*', '', line)
         
-        # محاولة اكتشاف العناوين (Headers)
-        # بما إننا عملنا Reshape، الـ Upper مش هيشتغل على العربي، بس شغال للإنجليزي
+        # Header Detection
         is_header = False
-        # شرط تقريبي للعناوين: لو السطر قصير ومفهوش علامات ترقيم كتير
-        if len(line) < 50 and "|" not in line and "." not in line and not line.startswith("-"): 
-             # لو إنجليزي وكله كابيتال يعتبر عنوان
+        if len(line) < 50 and "|" not in line and "." not in line and not line.startswith("-") and not line.startswith("•"):
              if re.search(r'[A-Z]', line) and line.isupper(): is_header = True
-             # لو عربي، صعب نحدد، بس ممكن نعتمد على المكان (حالياً هنخليه Bold بس)
 
         if is_header:
             pdf.ln(6)
-            pdf.set_font("Amiri", '', 13) # خط أكبر للعناوين
-            # في الـ PDF العناوين العربي بتطلع محتاجة محاذاة يمين (R) أو وسط (C)
-            # بما إننا عملنا Bidi، الكلام العربي هيظهر صح بس المحاذاة مهمة
+            pdf.set_font("Amiri", '', 13)
             pdf.cell(0, 6, line, ln=True, align='C') 
+            x = pdf.get_x(); y = pdf.get_y(); pdf.line(10, y, 200, y); pdf.ln(4)
+            pdf.set_font("Amiri", '', 11)
             
-            # رسم خط تحت العنوان
-            x = pdf.get_x(); y = pdf.get_y()
-            pdf.line(10, y, 200, y) 
-            pdf.ln(4)
-            pdf.set_font("Amiri", '', 11) # نرجع للخط العادي
-            
-        elif "|" in line and "@" in line: # سطر الكونتاكت
+        elif "|" in line and "@" in line:
             pdf.set_font("Amiri", '', 10)
-            pdf.multi_cell(0, 5, line, align='C')
-            pdf.ln(4)
+            pdf.multi_cell(0, 5, line, align='C'); pdf.ln(4)
             
-        elif "|" in line and "@" not in line: # تفاصيل الشغل (Role | Company)
+        elif "|" in line and "@" not in line:
             pdf.ln(4)
-            pdf.set_font("Amiri", '', 11) # ممكن نعمله Bold لو لقينا font bold
-            pdf.cell(0, 6, line, ln=True, align='L' if re.search(r'[a-zA-Z]', line) else 'R') # محاذاة حسب اللغة
-            pdf.ln(2)
-            
-        elif line.startswith('-') or line.startswith('•'): # القوائم (Bullets)
             pdf.set_font("Amiri", '', 11)
-            # تنظيف الرموز عشان العربي
+            pdf.cell(0, 6, line, ln=True, align='L'); pdf.ln(2)
+            
+        elif line.startswith('-') or line.startswith('•'):
+            pdf.set_font("Amiri", '', 11)
             clean_line = line.replace('-', '').replace('•', '').strip()
-            # إضافة نقطة يدوية عشان Bidi ممكن يعكس مكانها
-            pdf.multi_cell(0, 5, "• " + clean_line, align='L' if re.search(r'[a-zA-Z]', clean_line) else 'R')
-            pdf.ln(2)
+            pdf.multi_cell(0, 5, "• " + clean_line, align='L'); pdf.ln(2)
             
-        else: # نص عادي
+        else:
             pdf.set_font("Amiri", '', 11)
-            pdf.multi_cell(0, 5, line, align='L' if re.search(r'[a-zA-Z]', line) else 'R')
-            pdf.ln(1)
+            pdf.multi_cell(0, 5, line, align='L'); pdf.ln(1)
     
     buffer = io.BytesIO()
-    # هنا شلنا encode('latin-1') عشان ده اللي كان بيبوظ العربي
-    # FPDF with uni=True بيطلع binary مظبوط
-    pdf_output = pdf.output(dest='S')
-    
-    # تحويل الـ string لـ bytes لو لزم الأمر (حسب نسخة fpdf)
-    if isinstance(pdf_output, str):
-        buffer.write(pdf_output.encode('latin-1')) # fallback for old fpdf if uni=True fails, but usually with font it works differently.
-        # CORRECTION: With Unicode font in FPDF, we usually get bytes or strings that handle unicode properly.
-        # Let's rely on standard bytes output for streamlit.
-        # Actually, let's strictly write bytes:
-        pass 
-    
-    # الطريقة الأضمن مع الخطوط الخارجية:
-    buffer.write(pdf.output(dest='S').encode("latin1")) # FPDF 1.7.2 workaround for unicode injection
-    # *توضيح*: مع FPDF العادية واستخدام ttf، الدالة output بترجع string بترميز خاص، الـ encode("latin1") هنا مش بيبوظ العربي، هو بيحول الـ binary string لـ bytes عشان الـ Buffer.
-    
+    buffer.write(pdf.output(dest='S').encode("latin1"))
     buffer.seek(0)
     return buffer
 
@@ -299,23 +263,23 @@ if st.session_state.step < 6: st.progress(st.session_state.step / 6)
 if st.session_state.step == 1:
     st.header("1️⃣ Personal Information")
     
-    with st.expander("📄 Have an old CV? Upload to Auto-Fill", expanded=False):
+    with st.expander("📄 Have an old CV? Upload to Auto-Fill (Auto-Translate to English)", expanded=False):
         uploaded_file = st.file_uploader("Upload PDF or Word file", type=['pdf', 'docx', 'doc'])
         if uploaded_file is not None:
             if st.button("🧠 Auto-Fill with AI"):
-                with st.spinner("Reading file..."):
+                with st.spinner("Reading & Translating..."):
                     try:
                         if uploaded_file.name.endswith('.pdf'): text = extract_text_from_pdf(uploaded_file)
                         else: text = extract_text_from_docx(uploaded_file)
                         parsed_data = parse_resume_with_ai(text)
                         if parsed_data:
                             st.session_state.cv_data.update(parsed_data)
-                            st.success("Data extracted! Please review below.")
+                            st.success("Data extracted and translated to English!")
                             st.rerun()
                         else: st.error("Could not parse file.")
                     except Exception as e: st.error(f"Error: {e}")
 
-    st.info("Or fill in your details manually (Arabic or English supported):")
+    st.info("Write in **English** or **Arabic** (Output will be English):")
     with st.form("step1"):
         col1, col2 = st.columns(2)
         with col1:
@@ -329,7 +293,7 @@ if st.session_state.step == 1:
             github = st.text_input("GitHub Profile", st.session_state.cv_data.get('github', ''))
         
         st.markdown("---")
-        target_title = st.text_input("🔴 Target Job Title (Important for ATS)", st.session_state.cv_data.get('target_title', ''))
+        target_title = st.text_input("🔴 Target Job Title", st.session_state.cv_data.get('target_title', ''))
         
         st.markdown("### 🎓 Education")
         c1, c2, c3, c4 = st.columns(4)
@@ -344,10 +308,7 @@ if st.session_state.step == 1:
                     'name':name, 'email':email, 'phone':phone, 'linkedin':linkedin, 'city':city, 
                     'portfolio':portfolio, 'github':github, 
                     'target_title':target_title, 
-                    'university':university, 
-                    'college':college, 
-                    'degree':degree, 
-                    'grad_year':grad_year
+                    'university':university, 'college':college, 'degree':degree, 'grad_year':grad_year
                 })
                 next_step(); st.rerun()
             else: st.warning("Name and Target Job Title are required!")
@@ -356,7 +317,7 @@ if st.session_state.step == 1:
 elif st.session_state.step == 2:
     st.header("2️⃣ Skills")
     with st.form("step2"):
-        st.write("List your technical and soft skills:")
+        st.write("List your skills (Arabic input will be translated):")
         skills = st.text_area("Skills", st.session_state.cv_data.get('skills', ''), height=150)
         languages = st.text_input("Languages", st.session_state.cv_data.get('languages', ''))
         
@@ -372,23 +333,23 @@ elif st.session_state.step == 2:
 elif st.session_state.step == 3:
     st.header("3️⃣ Professional Experience")
     
-    st.markdown("##### ✨ Get AI Suggestions:")
+    st.markdown("##### ✨ Get English Suggestions:")
     c_input, c_btn = st.columns([3, 1])
     with c_input:
         default_role = st.session_state.cv_data.get('target_title', '')
-        suggestion_role = st.text_input("Enter Role Title for Suggestions", value=default_role, label_visibility='collapsed')
+        suggestion_role = st.text_input("Role Title", value=default_role, label_visibility='collapsed')
     with c_btn:
         if st.button("Get Suggestions 🧠", use_container_width=True):
             if suggestion_role:
-                with st.spinner("Thinking..."):
+                with st.spinner("Generating..."):
                     sugg = get_job_suggestions(suggestion_role)
                     current_text = st.session_state.cv_data.get('raw_experience', '')
                     st.session_state.cv_data['raw_experience'] = current_text + "\n" + sugg
                     st.rerun()
-            else: st.warning("Please enter a role title!")
+            else: st.warning("Enter a role title!")
 
     with st.form("step3"):
-        st.write("👇 Edit your experience here:")
+        st.write("👇 Edit Experience (You can write in Arabic):")
         raw_experience = st.text_area("Experience:", st.session_state.cv_data.get('raw_experience', ''), height=250)
         
         col1, col2 = st.columns([1, 5])
@@ -444,7 +405,7 @@ elif st.session_state.step == 6:
 
     with t1:
         if not st.session_state.final_cv:
-            with st.spinner("⏳ Writing your resume..."):
+            with st.spinner("⏳ Translating & Writing Resume..."):
                 contact_parts = [st.session_state.cv_data[k] for k in ['phone', 'city', 'email', 'linkedin', 'github', 'portfolio'] if st.session_state.cv_data.get(k)]
                 contact_line = " | ".join(contact_parts)
 
@@ -453,13 +414,18 @@ elif st.session_state.step == 6:
                 if st.session_state.cv_data.get('certs'): optional_prompt += f"\n6. **CERTIFICATIONS**\n   - {st.session_state.cv_data['certs']}"
                 if st.session_state.cv_data.get('volunteering'): optional_prompt += f"\n7. **VOLUNTEERING**\n   - {st.session_state.cv_data['volunteering']}"
 
+                # --- UPDATED FINAL PROMPT: FORCE TRANSLATION ---
                 prompt_cv = f"""
                 Act as a Senior Resume Expert. Write a professional CV based on this data.
-                **RULES:**
+                
+                **CRITICAL RULE:** **TRANSLATE ALL INPUT TO ENGLISH.** If the user wrote "الجيزة", write "Giza". 
+                If they wrote "طالب", write "Student".
+                The final output must be 100% English.
+                
+                **FORMATTING RULES:**
                 1. Clean Text Only (No markdown bold).
                 2. No Section Numbers.
-                3. Keep the input language (If user wrote in Arabic, keep it in Arabic). 
-                4. Dates: Use "Mon YYYY" format.
+                3. Dates: Use "Mon YYYY" format.
                 
                 **HEADER:**
                 {st.session_state.cv_data['name'].upper()}
@@ -469,7 +435,7 @@ elif st.session_state.step == 6:
                 PROFESSIONAL SUMMARY (Tailored to {st.session_state.cv_data['target_title']})
                 TECHNICAL SKILLS ({st.session_state.cv_data['skills']})
                 PROFESSIONAL EXPERIENCE (Role | Company | Dates)
-                User Data: {st.session_state.cv_data['raw_experience']}
+                User Data (Translate if needed): {st.session_state.cv_data['raw_experience']}
                 
                 EDUCATION 
                 - Degree: {st.session_state.cv_data.get('degree')}
@@ -488,7 +454,6 @@ elif st.session_state.step == 6:
         if st.session_state.final_cv:
             st.text_area("Resume Editor", st.session_state.final_cv, height=500)
             c1, c2, c3 = st.columns(3)
-            # زرار الـ PDF الآن يستخدم الدالة الجديدة التي تدعم العربي
             c1.download_button("⬇️ Download PDF", create_pdf(st.session_state.final_cv), file_name, "application/pdf")
             c2.download_button("⬇️ Download Word", create_docx(st.session_state.final_cv), word_file_name, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             if c3.button("🔄 Regenerate"): st.session_state.final_cv = ""; st.rerun()
@@ -496,7 +461,7 @@ elif st.session_state.step == 6:
     with t2:
         if st.button("✨ Write Cover Letter"):
             with st.spinner("Writing..."):
-                prompt_cl = f"Write a professional cover letter for {st.session_state.cv_data['name']} applying for {st.session_state.cv_data['target_title']}."
+                prompt_cl = f"Write a professional cover letter (in English) for {st.session_state.cv_data['name']} applying for {st.session_state.cv_data['target_title']}."
                 st.session_state.cover_letter = safe_generate(prompt_cl)
                 st.rerun()
         if st.session_state.cover_letter:
@@ -507,7 +472,7 @@ elif st.session_state.step == 6:
         if st.button("🔍 Check ATS Score"):
             with st.spinner("Analyzing..."):
                 context = jd if jd else st.session_state.cv_data['target_title']
-                prompt_ats = f"Analyze this CV against this Job/Role: {context}. Give a Score out of 100, list Missing Keywords, and suggest Improvements."
+                prompt_ats = f"Analyze this CV against this Job/Role: {context}. Give a Score out of 100, list Missing Keywords, and suggest Improvements (In English)."
                 st.session_state.ats_analysis = safe_generate(prompt_ats)
                 st.rerun()
         if st.session_state.ats_analysis: st.write(st.session_state.ats_analysis)
