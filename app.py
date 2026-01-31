@@ -440,7 +440,7 @@ elif st.session_state.step == 5:
         with c2:
             if st.form_submit_button("Generate CV 🚀"): st.session_state.cv_data['target_job'] = jd; next_step(); st.rerun()
 
-# STEP 6
+# --- STEP 6: RESULT ---
 elif st.session_state.step == 6:
     st.balloons(); st.success("CV Ready!")
     raw_name = st.session_state.cv_data.get('name', 'User')
@@ -451,12 +451,12 @@ elif st.session_state.step == 6:
     
     with t1:
         if not st.session_state.final_cv:
-            with st.spinner("Compiling Resume..."):
+            with st.spinner("Enhancing & Formatting..."):
                 # Contact
                 info = [st.session_state.cv_data[k] for k in ['phone', 'city', 'email', 'linkedin', 'github', 'portfolio'] if st.session_state.cv_data.get(k)]
                 c_line = " | ".join(info)
                 
-                # Education
+                # Education Loop
                 edu_lines = []
                 for e in st.session_state.cv_data['education_entries']:
                     if e.get('uni') or e.get('col'):
@@ -466,7 +466,7 @@ elif st.session_state.step == 6:
                         edu_lines.append(f"- {line}")
                 edu_block = "EDUCATION\n" + "\n".join(edu_lines) if edu_lines else ""
 
-                # Projects
+                # Projects Loop
                 proj_lines = []
                 for p in st.session_state.cv_data['project_entries']:
                     if p.get('title'):
@@ -475,13 +475,13 @@ elif st.session_state.step == 6:
                         proj_lines.append(f"**{head}**\n{p.get('desc','')}")
                 proj_block = "PROJECTS\n" + "\n\n".join(proj_lines) + "\n" if proj_lines else ""
 
-                # Certs
+                # Certs Loop
                 cert_lines = []
                 for c in st.session_state.cv_data['cert_entries']:
                     if c.get('title'): cert_lines.append(f"- {c['title']} | {c.get('auth','')}")
                 cert_block = "CERTIFICATIONS\n" + "\n".join(cert_lines) + "\n" if cert_lines else ""
 
-                # Vol
+                # Vol Loop
                 vol_lines = []
                 for v in st.session_state.cv_data['vol_entries']:
                     if v.get('role'): vol_lines.append(f"**{v['role']} | {v.get('org','')}**\n{v.get('desc','')}")
@@ -489,15 +489,23 @@ elif st.session_state.step == 6:
                 
                 langs = f"LANGUAGES\n- {st.session_state.cv_data['languages']}" if st.session_state.cv_data.get('languages') else ""
 
+                # --- التغيير الكبير هنا في البرومبت ---
                 prompt = f"""
-                Act as a Resume Expert. Rewrite in Professional ENGLISH.
-                RULES: 1. Translate Arabic to English. 2. Do not invent data. 3. Clean Text (No Markdown Bold). 4. Use UPPERCASE for Section Headers.
+                Act as an Expert Resume Writer. Rewrite the user's data into a HIGH-IMPACT, ATS-Optimized English Resume.
                 
-                {st.session_state.cv_data['name'].upper()}
-                {c_line}
+                **CRITICAL INSTRUCTIONS:**
+                1. **Language:** Translate EVERYTHING to Professional English.
+                2. **Enhance Experience:** - If the user provided short text or just a job title (e.g., "Sales Agent"), **YOU MUST GENERATE** 3-4 professional bullet points describing standard duties and achievements for that role using strong ACTION VERBS (e.g., "Increased," "Developed," "Managed").
+                   - If the user provided details, **POLISH** them to be more impactful.
+                3. **Enhance Projects:** If descriptions are brief, expand them to explain the tech stack and impact.
+                4. **Formatting:** Clean text only. Use UPPERCASE for Main Headers (EXPERIENCE, EDUCATION, etc.). No Markdown Bold (**).
+                
+                **DATA TO PROCESS:**
+                
+                HEADER: {st.session_state.cv_data['name'].upper()} \n {c_line}
                 
                 PROFESSIONAL SUMMARY
-                (Write a summary for {st.session_state.cv_data['target_title']})
+                (Write a powerful professional summary tailored for a {st.session_state.cv_data['target_title']} role)
                 
                 TECHNICAL SKILLS
                 {st.session_state.cv_data['skills']}
