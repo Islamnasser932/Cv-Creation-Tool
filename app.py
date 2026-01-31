@@ -94,15 +94,14 @@ def safe_generate(prompt_text):
     except Exception as e: return f"Error: {str(e)}"
 
 # ==========================================
-# 5. PROFESSIONAL PDF GENERATOR
+# 5. PROFESSIONAL PDF GENERATOR (BOLD HEADERS)
 # ==========================================
 class ProfessionalPDF(FPDF):
     def header(self): pass 
 
 def create_pdf(text):
-    # Reduced margins (Left/Right = 8mm)
     pdf = ProfessionalPDF(orientation='P', unit='mm', format='A4')
-    pdf.set_margins(left=8, top=10, right=8) 
+    pdf.set_margins(left=10, top=10, right=10) 
     pdf.add_page()
     
     try:
@@ -118,7 +117,7 @@ def create_pdf(text):
 
     # Name
     name = lines[0].strip()
-    pdf.set_font('Amiri-Bold', '', 22)
+    pdf.set_font('Amiri-Bold', '', 24)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, process_text_for_pdf(name), ln=True, align='C')
     
@@ -130,9 +129,9 @@ def create_pdf(text):
         pdf.ln(2)
         
         pdf.set_draw_color(0, 0, 0)
-        pdf.set_line_width(0.4)
+        pdf.set_line_width(0.5) # Bold Line
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(5)
+        pdf.ln(6)
 
     # --- 2. BODY ---
     for line in lines[2:]: 
@@ -141,18 +140,23 @@ def create_pdf(text):
         
         display_line = process_text_for_pdf(line.replace("### ", ""))
         
-        # HEADERS
+        # HEADERS (BOLDER & BIGGER)
         if line.startswith("### "):
-            pdf.ln(3)
-            pdf.set_font('Amiri-Bold', '', 12)
-            pdf.cell(0, 7, display_line.upper(), ln=True, align='L')
+            pdf.ln(4)
+            pdf.set_font('Amiri-Bold', '', 14) # Changed from 12 to 14
+            pdf.cell(0, 8, display_line.upper(), ln=True, align='L')
+            
+            # Thick Underline
+            pdf.set_line_width(0.5) 
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-            pdf.ln(2)
+            pdf.set_line_width(0.2) # Reset line width
+            
+            pdf.ln(3)
             
         # SUB-HEADERS
         elif "|" in line and not line.startswith("-") and not line.startswith("•"):
             pdf.ln(1)
-            pdf.set_font('Amiri-Bold', '', 10)
+            pdf.set_font('Amiri-Bold', '', 11)
             pdf.cell(0, 5, display_line, ln=True)
             
         # BULLETS
@@ -160,7 +164,7 @@ def create_pdf(text):
             pdf.set_font('Amiri', '', 10)
             clean_line = line.replace("-", "").replace("•", "").strip()
             pdf.set_x(12) 
-            pdf.multi_cell(190, 5, "• " + process_text_for_pdf(clean_line))
+            pdf.multi_cell(188, 5, "• " + process_text_for_pdf(clean_line))
             
         # NORMAL TEXT
         else:
@@ -180,7 +184,7 @@ def create_docx(text):
     clean_lines = [l for l in lines if "CONTACT INFORMATION" not in l.upper()]
     
     head = doc.add_paragraph(); head.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-    run = head.add_run(clean_lines[0]); run.bold = True; run.font.size = Pt(20)
+    run = head.add_run(clean_lines[0]); run.bold = True; run.font.size = Pt(22)
     
     if len(clean_lines) > 1:
         contact = doc.add_paragraph(clean_lines[1]); contact.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
@@ -191,8 +195,8 @@ def create_docx(text):
         if not line: continue
         
         if line.startswith("### "):
-            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(12)
-            run = p.add_run(line.replace("### ", "").upper()); run.bold = True; run.font.size = Pt(12)
+            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(14)
+            run = p.add_run(line.replace("### ", "").upper()); run.bold = True; run.font.size = Pt(14)
         elif "|" in line and not line.startswith("-"):
             p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(6)
             run = p.add_run(line); run.bold = True
@@ -389,7 +393,7 @@ elif st.session_state.step == 6:
                 
                 langs = f"### LANGUAGES\n- {st.session_state.cv_data['languages']}" if st.session_state.cv_data.get('languages') else ""
 
-                # --- PROMPT: REVERSE CHRONOLOGICAL ORDER FIX ---
+                # PROMPT FIX: Reverse Chronological Order
                 prompt = f"""
                 Act as a Resume Expert. Rewrite in Professional ENGLISH.
                 
