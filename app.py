@@ -94,7 +94,7 @@ def safe_generate(prompt_text):
     except Exception as e: return f"Error: {str(e)}"
 
 # ==========================================
-# 5. PROFESSIONAL PDF GENERATOR (BOLD HEADERS)
+# 5. PROFESSIONAL PDF GENERATOR
 # ==========================================
 class ProfessionalPDF(FPDF):
     def header(self): pass 
@@ -110,7 +110,6 @@ def create_pdf(text):
     except:
         pdf.add_font('Arial', '', '', uni=True) 
 
-    # --- 1. HEADER ---
     lines = text.split('\n')
     clean_lines = [l for l in lines if "CONTACT INFORMATION" not in l.upper()]
     lines = clean_lines
@@ -129,44 +128,37 @@ def create_pdf(text):
         pdf.ln(2)
         
         pdf.set_draw_color(0, 0, 0)
-        pdf.set_line_width(0.5) # Bold Line
+        pdf.set_line_width(0.5) 
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(6)
 
-    # --- 2. BODY ---
+    # Body
     for line in lines[2:]: 
         line = line.strip()
         if not line: continue
         
         display_line = process_text_for_pdf(line.replace("### ", ""))
         
-        # HEADERS (BOLDER & BIGGER)
         if line.startswith("### "):
             pdf.ln(4)
-            pdf.set_font('Amiri-Bold', '', 14) # Changed from 12 to 14
+            pdf.set_font('Amiri-Bold', '', 14)
             pdf.cell(0, 8, display_line.upper(), ln=True, align='L')
-            
-            # Thick Underline
             pdf.set_line_width(0.5) 
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-            pdf.set_line_width(0.2) # Reset line width
-            
+            pdf.set_line_width(0.2)
             pdf.ln(3)
             
-        # SUB-HEADERS
         elif "|" in line and not line.startswith("-") and not line.startswith("•"):
             pdf.ln(1)
             pdf.set_font('Amiri-Bold', '', 11)
             pdf.cell(0, 5, display_line, ln=True)
             
-        # BULLETS
         elif line.startswith("-") or line.startswith("•"):
             pdf.set_font('Amiri', '', 10)
             clean_line = line.replace("-", "").replace("•", "").strip()
             pdf.set_x(12) 
             pdf.multi_cell(188, 5, "• " + process_text_for_pdf(clean_line))
             
-        # NORMAL TEXT
         else:
             pdf.set_font('Amiri', '', 10)
             pdf.multi_cell(0, 5, display_line)
@@ -352,7 +344,7 @@ elif st.session_state.step == 5:
 
 # STEP 6
 elif st.session_state.step == 6:
-    st.balloons(); st.success("CV Ready!")
+    st.success("✅ CV Generated Successfully")
     raw_name = st.session_state.cv_data.get('name', 'User')
     safe_name = "".join([c if c.isalnum() or c==" " else "_" for c in raw_name]).strip().replace(" ", "_") or "CV"
     t1, t2, t3 = st.tabs(["Resume", "Cover Letter", "ATS Score"])
@@ -393,7 +385,6 @@ elif st.session_state.step == 6:
                 
                 langs = f"### LANGUAGES\n- {st.session_state.cv_data['languages']}" if st.session_state.cv_data.get('languages') else ""
 
-                # PROMPT FIX: Reverse Chronological Order
                 prompt = f"""
                 Act as a Resume Expert. Rewrite in Professional ENGLISH.
                 
