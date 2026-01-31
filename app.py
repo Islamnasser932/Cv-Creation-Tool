@@ -480,3 +480,4 @@ elif st.session_state.step == 6:
     st.markdown("---")
     if st.button("Start Over"):
         st.session_state.step = 1; st.session_state.cv_data = {}; st.session_state.final_cv = ""; st.rerun()
+        
