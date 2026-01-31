@@ -6,6 +6,9 @@ from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from fpdf import FPDF
 import io
+import re
+import json
+from pypdf import PdfReader
 import requests
 import arabic_reshaper
 from bidi.algorithm import get_display
@@ -30,12 +33,10 @@ FONT_BOLD_PATH = "Amiri-Bold.ttf"
 
 def check_and_download_font():
     if not os.path.exists(FONT_PATH) or os.path.getsize(FONT_PATH) < 1000:
-        try:
-            r = requests.get(FONT_URL); open(FONT_PATH, "wb").write(r.content)
+        try: requests.get(FONT_URL, timeout=10).content; open(FONT_PATH, "wb").write(requests.get(FONT_URL).content)
         except: pass
     if not os.path.exists(FONT_BOLD_PATH) or os.path.getsize(FONT_BOLD_PATH) < 1000:
-        try:
-            r = requests.get(FONT_BOLD_URL); open(FONT_BOLD_PATH, "wb").write(r.content)
+        try: requests.get(FONT_BOLD_URL, timeout=10).content; open(FONT_BOLD_PATH, "wb").write(requests.get(FONT_BOLD_URL).content)
         except: pass
 
 check_and_download_font()
@@ -63,6 +64,21 @@ def process_text_for_pdf(text):
     try: return get_display(arabic_reshaper.reshape(text))
     except: return text
 
+def extract_text_from_pdf(file):
+    reader = PdfReader(file); text = "" 
+    for page in reader.pages: text += page.extract_text()
+    return text
+
+def extract_text_from_docx(file):
+    doc = Document(file); return "\n".join([para.text for para in doc.paragraphs])
+
+def parse_resume_with_ai(text):
+    prompt = f"Extract details. Source: {text[:6000]}. Output JSON: name, email, phone, city, linkedin, portfolio, github, target_title, skills, experience, education_list."
+    try:
+        completion = client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], response_format={"type": "json_object"})
+        return json.loads(completion.choices[0].message.content)
+    except: return None
+
 def get_job_suggestions(role_title):
     try:
         completion = client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": f"Give 5 English resume bullet points for {role_title} with metrics."}])
@@ -76,12 +92,13 @@ def safe_generate(prompt_text):
     except Exception as e: return f"Error: {str(e)}"
 
 # ==========================================
-# 5. PROFESSIONAL PDF GENERATOR (BOLD HEADERS FIXED)
+# 5. PROFESSIONAL PDF GENERATOR (MANUAL HEADER)
 # ==========================================
 class ProfessionalPDF(FPDF):
     def header(self): pass 
 
-def create_pdf(text):
+def create_pdf(text, user_data):
+    # Setup PDF
     pdf = ProfessionalPDF(orientation='P', unit='mm', format='A4')
     pdf.set_margins(left=10, top=10, right=10) 
     pdf.add_page()
@@ -90,60 +107,80 @@ def create_pdf(text):
         pdf.add_font('Amiri', '', FONT_PATH, uni=True)
         pdf.add_font('Amiri-Bold', '', FONT_BOLD_PATH, uni=True)
     except:
-        pdf.add_font('Arial', '', '', uni=True) 
+        pdf.add_font('Arial', '', '', uni=True)
 
-    lines = text.split('\n')
-    clean_lines = [l for l in lines if "CONTACT INFORMATION" not in l.upper()]
-    lines = clean_lines
-
+    # ---------------------------------------------------------
+    # 1. PYTHON-GENERATED HEADER (100% Control - No AI Errors)
+    # ---------------------------------------------------------
     # Name
-    name = lines[0].strip()
     pdf.set_font('Amiri-Bold', '', 24)
     pdf.set_text_color(0, 0, 0)
+    name = user_data.get('name', 'Name')
     pdf.cell(0, 10, process_text_for_pdf(name), ln=True, align='C')
     
-    # Contact Info
-    if len(lines) > 1:
-        pdf.set_font('Amiri', '', 9)
-        contact = lines[1].strip()
-        pdf.multi_cell(0, 5, process_text_for_pdf(contact), align='C')
-        pdf.ln(2)
-        
-        pdf.set_draw_color(0, 0, 0)
-        pdf.set_line_width(0.5) 
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(6)
+    # Contact Info Construction
+    parts = []
+    if user_data.get('phone'): parts.append(user_data['phone'])
+    if user_data.get('city'): parts.append(user_data['city'])
+    if user_data.get('email'): parts.append(user_data['email'])
+    if user_data.get('linkedin'): parts.append(user_data['linkedin'])
+    if user_data.get('portfolio'): parts.append(user_data['portfolio'])
+    if user_data.get('github'): parts.append(user_data['github'])
+    
+    contact_line = " | ".join(parts)
+    
+    pdf.set_font('Amiri', '', 9)
+    pdf.set_text_color(0, 0, 0) # Black
+    pdf.multi_cell(0, 5, process_text_for_pdf(contact_line), align='C')
+    pdf.ln(3)
+    
+    # Line Separator
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(0.5)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(5)
 
-    # Body
-    for line in lines[2:]: 
+    # ---------------------------------------------------------
+    # 2. AI-GENERATED BODY (Parsed Line by Line)
+    # ---------------------------------------------------------
+    lines = text.split('\n')
+    
+    for line in lines: 
         line = line.strip()
         if not line: continue
         
-        display_line = process_text_for_pdf(line.replace("### ", ""))
+        # Remove markdown bold if AI adds it
+        clean_text = line.replace("**", "").replace("##", "")
+        display_line = process_text_for_pdf(clean_text)
         
-        # --- HEADERS (FIXED: BOLD & BIGGER) ---
-        if line.startswith("### "):
-            pdf.ln(5)
-            pdf.set_font('Amiri-Bold', '', 15) # Bold and Size 15
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(0, 8, display_line.upper(), ln=True, align='L')
+        # --- HEADERS (### Section) ---
+        if "###" in line:
+            pdf.ln(4)
+            pdf.set_font('Amiri-Bold', '', 14)
+            clean_header = line.replace("###", "").strip().upper()
+            pdf.cell(0, 8, clean_header, ln=True, align='L')
             
+            # Underline
             pdf.set_line_width(0.5) 
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
             pdf.set_line_width(0.2)
-            pdf.ln(3)
+            pdf.ln(2)
             
-        elif "|" in line and not line.startswith("-") and not line.startswith("•"):
+        # --- SUB-HEADERS (Bold roles) ---
+        # Detect lines that look like "Role | Company" or have specific keywords
+        elif "|" in line and not line.startswith("-"):
             pdf.ln(1)
             pdf.set_font('Amiri-Bold', '', 11)
             pdf.cell(0, 5, display_line, ln=True)
             
+        # --- BULLET POINTS (Experience/Projects) ---
         elif line.startswith("-") or line.startswith("•"):
             pdf.set_font('Amiri', '', 10)
-            clean_line = line.replace("-", "").replace("•", "").strip()
+            clean_bullet = line.replace("-", "").replace("•", "").strip()
             pdf.set_x(12) 
-            pdf.multi_cell(188, 5, "• " + process_text_for_pdf(clean_line))
+            pdf.multi_cell(188, 5, "• " + process_text_for_pdf(clean_bullet))
             
+        # --- NORMAL TEXT (Summary/Skills) ---
         else:
             pdf.set_font('Amiri', '', 10)
             pdf.multi_cell(0, 5, display_line)
@@ -154,33 +191,39 @@ def create_pdf(text):
     buffer.seek(0)
     return buffer
 
-def create_docx(text):
+def create_docx(text, user_data):
     doc = Document()
     style = doc.styles['Normal']; style.font.name = 'Arial'; style.font.size = Pt(10)
-    lines = text.split('\n')
-    clean_lines = [l for l in lines if "CONTACT INFORMATION" not in l.upper()]
     
-    head = doc.add_paragraph(); head.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-    run = head.add_run(clean_lines[0]); run.bold = True; run.font.size = Pt(22)
+    # 1. Python Header
+    head = doc.add_paragraph()
+    head.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    run = head.add_run(user_data.get('name', ''))
+    run.bold = True; run.font.size = Pt(22); run.font.color.rgb = RGBColor(0,0,0)
     
-    if len(clean_lines) > 1:
-        contact = doc.add_paragraph(clean_lines[1]); contact.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        contact.runs[0].font.size = Pt(9)
+    # Contact
+    parts = [user_data.get(k) for k in ['phone','city','email','linkedin','portfolio','github'] if user_data.get(k)]
+    contact_p = doc.add_paragraph(" | ".join(parts))
+    contact_p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    contact_p.runs[0].font.size = Pt(9)
 
-    for line in clean_lines[2:]:
+    # 2. Body
+    lines = text.split('\n')
+    for line in lines:
         line = line.strip(); 
         if not line: continue
+        clean_text = line.replace("**", "").replace("##", "").replace("###", "").strip()
         
-        if line.startswith("### "):
-            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(14)
-            run = p.add_run(line.replace("### ", "").upper()); run.bold = True; run.font.size = Pt(14)
+        if "###" in line:
+            p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(12)
+            run = p.add_run(clean_text.upper()); run.bold = True; run.font.size = Pt(14)
         elif "|" in line and not line.startswith("-"):
             p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(6)
-            run = p.add_run(line); run.bold = True
+            run = p.add_run(clean_text); run.bold = True
         elif line.startswith("-") or line.startswith("•"):
-            doc.add_paragraph(line.replace("-", "").replace("•", "").strip(), style='List Bullet')
+            doc.add_paragraph(clean_text.replace("-", "").replace("•", "").strip(), style='List Bullet')
         else:
-            doc.add_paragraph(line)
+            doc.add_paragraph(clean_text)
             
     buffer = io.BytesIO(); doc.save(buffer); buffer.seek(0)
     return buffer
@@ -208,8 +251,6 @@ if st.session_state.step < 6: st.progress(st.session_state.step / 6)
 # STEP 1
 if st.session_state.step == 1:
     st.header("1️⃣ Personal Info")
-    # REMOVED AUTO-FILL SECTION HERE
-
     with st.form("s1"):
         c1, c2 = st.columns(2)
         with c1: 
@@ -327,11 +368,7 @@ elif st.session_state.step == 6:
     with t1:
         if not st.session_state.final_cv:
             with st.spinner("Compiling Resume..."):
-                # Contact Line
-                info = [st.session_state.cv_data[k] for k in ['phone', 'city', 'email', 'linkedin', 'portfolio', 'github'] if st.session_state.cv_data.get(k)]
-                c_line = " | ".join(info)
-                
-                # Education
+                # Education Loop
                 edu_lines = []
                 for e in st.session_state.cv_data['education_entries']:
                     if e.get('uni') or e.get('col'):
@@ -347,29 +384,31 @@ elif st.session_state.step == 6:
                     if p.get('title'):
                         head = p['title']
                         if p.get('link'): head += f" | {p['link']}"
-                        proj_lines.append(f"{head}\n{p.get('desc','')}")
-                proj_block = "### PROJECTS\n" + "\n\n".join(proj_lines) + "\n" if proj_lines else ""
+                        proj_lines.append(f"{head}\n- {p.get('desc','')}") # Force bullet for desc
+                proj_block = "### PROJECTS\n" + "\n".join(proj_lines) + "\n" if proj_lines else ""
 
                 # Certs & Vol
                 cert_lines = [f"- {c['title']} | {c.get('auth','')}" for c in st.session_state.cv_data['cert_entries'] if c.get('title')]
                 cert_block = "### CERTIFICATIONS\n" + "\n".join(cert_lines) + "\n" if cert_lines else ""
+                vol_lines = [f"{v['role']} | {v.get('org','')}\n- {v.get('desc','')}" for v in st.session_state.cv_data['vol_entries'] if v.get('role')]
+                vol_block = "### VOLUNTEERING\n" + "\n".join(vol_lines) + "\n" if vol_lines else ""
                 
-                vol_lines = [f"{v['role']} | {v.get('org','')}\n{v.get('desc','')}" for v in st.session_state.cv_data['vol_entries'] if v.get('role')]
-                vol_block = "### VOLUNTEERING\n" + "\n\n".join(vol_lines) + "\n" if vol_lines else ""
-                
-                langs = f"### LANGUAGES\n- {st.session_state.cv_data['languages']}" if st.session_state.cv_data.get('languages') else ""
+                # Fixed: Languages in one line
+                langs = f"### LANGUAGES\n{st.session_state.cv_data['languages']}" if st.session_state.cv_data.get('languages') else ""
 
+                # PROMPT FIX: Force Bullet Points & Clean Structure
                 prompt = f"""
                 Act as a Resume Expert. Rewrite in Professional ENGLISH.
                 
                 CRITICAL RULES:
-                1. **ORDER:** Sort EXPERIENCE items in **REVERSE CHRONOLOGICAL ORDER** (Newest job first, Oldest last).
-                2. **METRICS:** Add numbers/metrics to Experience descriptions (e.g. "Increased by 20%").
-                3. **SKILLS:** Comma-separated paragraph.
-                4. **CLEAN:** No "CONTACT INFORMATION" header. No markdown bold. Use "### " for sections.
+                1. **NO HEADER:** Do NOT output name/contact info. Start directly with Professional Summary.
+                2. **EXPERIENCE:** Convert ALL experience descriptions into **BULLET POINTS** (- ). Do NOT use paragraphs.
+                3. **METRICS:** Add realistic numbers/percentages to every bullet point.
+                4. **ORDER:** Sort Experience REVERSE CHRONOLOGICAL (Newest First).
+                5. **FORMAT:** Use "### " for Section Headers.
+                6. **SKILLS/LANGUAGES:** Keep them as a comma-separated list in one paragraph.
                 
-                {st.session_state.cv_data['name'].upper()}
-                {c_line}
+                DATA TO PROCESS:
                 
                 ### PROFESSIONAL SUMMARY
                 (Summary for {st.session_state.cv_data['target_title']})
@@ -393,15 +432,16 @@ elif st.session_state.step == 6:
         if st.session_state.final_cv:
             st.text_area("Editor", st.session_state.final_cv, height=500)
             c1, c2, c3 = st.columns(3)
-            c1.download_button("PDF", create_pdf(st.session_state.final_cv), f"{safe_name}.pdf", "application/pdf")
-            c2.download_button("Word", create_docx(st.session_state.final_cv), f"{safe_name}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            # Pass user_data to create_pdf for the manual header
+            c1.download_button("PDF", create_pdf(st.session_state.final_cv, st.session_state.cv_data), f"{safe_name}.pdf", "application/pdf")
+            c2.download_button("Word", create_docx(st.session_state.final_cv, st.session_state.cv_data), f"{safe_name}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             if c3.button("Reset"): st.session_state.final_cv=""; st.rerun()
 
     with t2:
         if st.button("Generate Letter"):
             with st.spinner("..."): st.session_state.cover_letter = safe_generate(f"Write English Cover Letter for {st.session_state.cv_data['name']}, Role: {st.session_state.cv_data['target_title']}")
             st.rerun()
-        if st.session_state.cover_letter: st.text_area("Letter", st.session_state.cover_letter); st.download_button("Download", create_docx(st.session_state.cover_letter), "Cover.docx")
+        if st.session_state.cover_letter: st.text_area("Letter", st.session_state.cover_letter); st.download_button("Download", create_docx(st.session_state.cover_letter, st.session_state.cv_data), "Cover.docx")
 
     with t3:
         if st.button("ATS Check"):
