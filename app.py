@@ -24,27 +24,38 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. FONT SETUP & DESIGN CONSTANTS
+# 2. FONT SETUP (THE FIX)
 # ==========================================
+# URLs for Arabic Fonts
 FONT_URL = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
 FONT_BOLD_URL = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Bold.ttf"
+
 FONT_PATH = "Amiri-Regular.ttf"
 FONT_BOLD_PATH = "Amiri-Bold.ttf"
 
-# Colors (Navy Blue Theme)
-PRIMARY_COLOR = (0, 51, 102) # Dark Blue
-SECONDARY_COLOR = (105, 105, 105) # Gray
-TEXT_COLOR = (0, 0, 0) # Black
-
 def check_and_download_font():
+    """Checks and downloads fonts individually to avoid missing file errors."""
+    # 1. Check Regular Font
     if not os.path.exists(FONT_PATH):
         try:
-            response = requests.get(FONT_URL); 
-            with open(FONT_PATH, "wb") as f: f.write(response.content)
-            response_b = requests.get(FONT_BOLD_URL); 
-            with open(FONT_BOLD_PATH, "wb") as f: f.write(response_b.content)
-        except: pass
+            with st.spinner("Downloading Regular Font..."):
+                response = requests.get(FONT_URL)
+                with open(FONT_PATH, "wb") as f:
+                    f.write(response.content)
+        except Exception as e:
+            st.error(f"Failed to download Regular font: {e}")
 
+    # 2. Check Bold Font (This was the missing check)
+    if not os.path.exists(FONT_BOLD_PATH):
+        try:
+            with st.spinner("Downloading Bold Font..."):
+                response = requests.get(FONT_BOLD_URL)
+                with open(FONT_BOLD_PATH, "wb") as f:
+                    f.write(response.content)
+        except Exception as e:
+            st.error(f"Failed to download Bold font: {e}")
+
+# Run the check immediately
 check_and_download_font()
 
 # ==========================================
@@ -56,7 +67,7 @@ if "GROQ_API_KEY" in st.secrets:
 
 with st.sidebar:
     st.title("🎨 Elite CV Builder")
-    st.info("New Design System Applied ✨")
+    st.success("System Status: Ready 🟢")
     
     use_own_key = st.checkbox("Use my own API Key")
     if use_own_key:
@@ -126,31 +137,42 @@ def safe_generate(prompt_text):
     except Exception as e: return f"Error: {str(e)}"
 
 # ==========================================
-# 5. PROFESSIONAL PDF GENERATOR (THE FIX)
+# 5. PROFESSIONAL PDF GENERATOR
 # ==========================================
+# Colors (Navy Blue Theme)
+PRIMARY_COLOR = (0, 51, 102) # Dark Blue
+SECONDARY_COLOR = (105, 105, 105) # Gray
+TEXT_COLOR = (0, 0, 0) # Black
+
 class ProfessionalPDF(FPDF):
     def header(self):
-        # No automatic header to allow custom first page design
         pass 
 
 def create_pdf(text):
     pdf = ProfessionalPDF()
     pdf.add_page()
     
-    # Register Fonts
-    pdf.add_font('Amiri', '', FONT_PATH, uni=True)
-    pdf.add_font('Amiri-Bold', '', FONT_BOLD_PATH, uni=True)
+    # Register Fonts Safe Check
+    # We use a try-except block here just in case the file is corrupted or missing
+    try:
+        pdf.add_font('Amiri', '', FONT_PATH, uni=True)
+        pdf.add_font('Amiri-Bold', '', FONT_BOLD_PATH, uni=True)
+    except RuntimeError:
+        st.error("Font file missing. Attempting to re-download...")
+        check_and_download_font() # Last ditch attempt
+        pdf.add_font('Amiri', '', FONT_PATH, uni=True)
+        pdf.add_font('Amiri-Bold', '', FONT_BOLD_PATH, uni=True)
+
     
-    # --- 1. HEADER SECTION (Name & Contact) ---
+    # --- 1. HEADER SECTION ---
     pdf.set_font('Amiri-Bold', '', 24)
     pdf.set_text_color(*PRIMARY_COLOR)
     
-    # Get Name from text (First Line)
     lines = text.split('\n')
     name = lines[0].strip()
     pdf.cell(0, 10, process_text_for_pdf(name), ln=True, align='C')
     
-    # Contact Line (Second Line)
+    # Contact Line
     if len(lines) > 1:
         pdf.set_font('Amiri', '', 10)
         pdf.set_text_color(*SECONDARY_COLOR)
@@ -158,7 +180,6 @@ def create_pdf(text):
         pdf.cell(0, 6, process_text_for_pdf(contact), ln=True, align='C')
         pdf.ln(4)
         
-        # Draw Line
         pdf.set_draw_color(*PRIMARY_COLOR)
         pdf.set_line_width(0.5)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
@@ -167,37 +188,32 @@ def create_pdf(text):
     # --- 2. BODY CONTENT ---
     pdf.set_text_color(*TEXT_COLOR)
     
-    for line in lines[2:]: # Skip name and contact
+    for line in lines[2:]: 
         line = line.strip()
         if not line: continue
         
-        # Process Arabic
         display_line = process_text_for_pdf(line)
         
-        # --- STYLE LOGIC ---
-        
-        # SECTION HEADERS (UpperCase words like EXPERIENCE, EDUCATION)
+        # HEADERS
         if line.isupper() and len(line) < 40 and "|" not in line:
             pdf.ln(4)
             pdf.set_font('Amiri-Bold', '', 13)
             pdf.set_text_color(*PRIMARY_COLOR)
             pdf.cell(0, 8, display_line, ln=True, align='L')
-            # Section Underline
-            pdf.set_draw_color(200, 200, 200) # Light Gray
+            pdf.set_draw_color(200, 200, 200)
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
             pdf.ln(2)
-            pdf.set_text_color(*TEXT_COLOR) # Reset color
+            pdf.set_text_color(*TEXT_COLOR)
             
-        # SUB-HEADERS (Role | Company)
+        # SUB-HEADERS
         elif "|" in line:
             pdf.set_font('Amiri-Bold', '', 11)
             pdf.cell(0, 6, display_line, ln=True)
             
-        # BULLET POINTS
+        # BULLETS
         elif line.startswith("-") or line.startswith("•"):
             pdf.set_font('Amiri', '', 10)
             clean_line = line.replace("-", "").replace("•", "").strip()
-            # Indent bullet
             pdf.set_x(15) 
             pdf.multi_cell(0, 5, "• " + process_text_for_pdf(clean_line))
             pdf.ln(1)
@@ -221,15 +237,13 @@ def create_docx(text):
     
     lines = text.split('\n')
     
-    # Name (Header)
     head = doc.add_paragraph()
     head.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
     run = head.add_run(lines[0])
     run.bold = True
     run.font.size = Pt(20)
-    run.font.color.rgb = RGBColor(0, 51, 102) # Navy Blue
+    run.font.color.rgb = RGBColor(0, 51, 102) 
     
-    # Contact
     if len(lines) > 1:
         contact = doc.add_paragraph(lines[1])
         contact.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
@@ -248,8 +262,6 @@ def create_docx(text):
             run.bold = True
             run.font.size = Pt(12)
             run.font.color.rgb = RGBColor(0, 51, 102)
-            # Underline hack
-            p_border = doc.add_paragraph() # Simulating spacing/border with empty para for now
             
         elif "|" in line:
             p = doc.add_paragraph()
@@ -273,7 +285,6 @@ def create_docx(text):
 if 'step' not in st.session_state: st.session_state.step = 1
 if 'cv_data' not in st.session_state: st.session_state.cv_data = {}
 
-# Lists
 if 'education_entries' not in st.session_state.cv_data: st.session_state.cv_data['education_entries'] = [{'uni': '', 'col': '', 'deg': '', 'year': ''}]
 if 'project_entries' not in st.session_state.cv_data: st.session_state.cv_data['project_entries'] = []
 if 'cert_entries' not in st.session_state.cv_data: st.session_state.cv_data['cert_entries'] = []
@@ -445,7 +456,7 @@ elif st.session_state.step == 6:
                 info = [st.session_state.cv_data[k] for k in ['phone', 'city', 'email', 'linkedin', 'github', 'portfolio'] if st.session_state.cv_data.get(k)]
                 c_line = " | ".join(info)
                 
-                # Education Loop
+                # Education
                 edu_lines = []
                 for e in st.session_state.cv_data['education_entries']:
                     if e.get('uni') or e.get('col'):
@@ -455,7 +466,7 @@ elif st.session_state.step == 6:
                         edu_lines.append(f"- {line}")
                 edu_block = "EDUCATION\n" + "\n".join(edu_lines) if edu_lines else ""
 
-                # Projects Loop
+                # Projects
                 proj_lines = []
                 for p in st.session_state.cv_data['project_entries']:
                     if p.get('title'):
@@ -464,13 +475,13 @@ elif st.session_state.step == 6:
                         proj_lines.append(f"**{head}**\n{p.get('desc','')}")
                 proj_block = "PROJECTS\n" + "\n\n".join(proj_lines) + "\n" if proj_lines else ""
 
-                # Certs Loop
+                # Certs
                 cert_lines = []
                 for c in st.session_state.cv_data['cert_entries']:
                     if c.get('title'): cert_lines.append(f"- {c['title']} | {c.get('auth','')}")
                 cert_block = "CERTIFICATIONS\n" + "\n".join(cert_lines) + "\n" if cert_lines else ""
 
-                # Vol Loop
+                # Vol
                 vol_lines = []
                 for v in st.session_state.cv_data['vol_entries']:
                     if v.get('role'): vol_lines.append(f"**{v['role']} | {v.get('org','')}**\n{v.get('desc','')}")
