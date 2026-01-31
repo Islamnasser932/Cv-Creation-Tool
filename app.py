@@ -2,7 +2,7 @@ import streamlit as st
 import os
 from groq import Groq
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from fpdf import FPDF
 import io
@@ -18,46 +18,45 @@ from bidi.algorithm import get_display
 # ==========================================
 st.set_page_config(
     page_title="Elite CV Builder",
-    page_icon="🚀",
+    page_icon="👔",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ==========================================
-# 2. FONT SETUP (ARABIC SUPPORT)
+# 2. FONT SETUP & DESIGN CONSTANTS
 # ==========================================
 FONT_URL = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
+FONT_BOLD_URL = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Bold.ttf"
 FONT_PATH = "Amiri-Regular.ttf"
+FONT_BOLD_PATH = "Amiri-Bold.ttf"
+
+# Colors (Navy Blue Theme)
+PRIMARY_COLOR = (0, 51, 102) # Dark Blue
+SECONDARY_COLOR = (105, 105, 105) # Gray
+TEXT_COLOR = (0, 0, 0) # Black
 
 def check_and_download_font():
     if not os.path.exists(FONT_PATH):
-        with st.spinner("Initializing fonts..."):
-            try:
-                response = requests.get(FONT_URL)
-                with open(FONT_PATH, "wb") as f:
-                    f.write(response.content)
-            except: pass
+        try:
+            response = requests.get(FONT_URL); 
+            with open(FONT_PATH, "wb") as f: f.write(response.content)
+            response_b = requests.get(FONT_BOLD_URL); 
+            with open(FONT_BOLD_PATH, "wb") as f: f.write(response_b.content)
+        except: pass
 
 check_and_download_font()
 
 # ==========================================
-# 3. API & SIDEBAR
+# 3. API SETUP
 # ==========================================
 api_key = None
 if "GROQ_API_KEY" in st.secrets:
     api_key = st.secrets["GROQ_API_KEY"]
 
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=50)
-    st.title("💡 Elite Guide")
-    st.markdown("""
-    **Steps:**
-    1. **Personal Info:** Add multiple Education entries.
-    2. **Skills:** List your stack.
-    3. **Experience:** Use AI suggestions.
-    4. **Projects:** Add Title, Link, & Description for each.
-    5. **Download:** Get ATS-Friendly PDF/Word.
-    """)
+    st.title("🎨 Elite CV Builder")
+    st.info("New Design System Applied ✨")
     
     use_own_key = st.checkbox("Use my own API Key")
     if use_own_key:
@@ -80,23 +79,19 @@ def process_text_for_pdf(text):
     except: return text
 
 def extract_text_from_pdf(file):
-    reader = PdfReader(file)
-    text = "" 
-    for page in reader.pages: 
-        text += page.extract_text()
+    reader = PdfReader(file); text = "" 
+    for page in reader.pages: text += page.extract_text()
     return text
 
 def extract_text_from_docx(file):
-    doc = Document(file)
-    return "\n".join([para.text for para in doc.paragraphs])
+    doc = Document(file); return "\n".join([para.text for para in doc.paragraphs])
 
 def parse_resume_with_ai(text):
     prompt = f"""
     You are a Data Extraction Assistant.
     Task: Extract resume details from the text below and TRANSLATE values to English.
     
-    Source Text:
-    {text[:6000]} 
+    Source Text: {text[:6000]} 
     
     Output ONLY valid JSON with keys: 
     "name", "email", "phone", "city", "linkedin", "target_title", "skills", "experience", "education_list" (array of objects with uni, col, deg, year).
@@ -124,126 +119,169 @@ def safe_generate(prompt_text):
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[{"role": "system", "content": "You are a Senior HR Recruiter. Output strict clean text."}, {"role": "user", "content": prompt_text}],
+            messages=[{"role": "system", "content": "You are a Professional Resume Writer. Output clean, unformatted text."}, {"role": "user", "content": prompt_text}],
             temperature=0.3
         )
         return completion.choices[0].message.content
     except Exception as e: return f"Error: {str(e)}"
 
 # ==========================================
-# 5. FILE GENERATORS
+# 5. PROFESSIONAL PDF GENERATOR (THE FIX)
 # ==========================================
-def create_docx(text):
-    doc = Document()
-    for s in doc.sections: 
-        s.top_margin = Inches(0.5); s.bottom_margin = Inches(0.5)
-        s.left_margin = Inches(0.5); s.right_margin = Inches(0.5)
-    
-    text = text.replace("**", "").replace("##", "")
-    for line in text.split('\n'):
-        line = line.strip()
-        if not line: continue
-        
-        line_no_num = re.sub(r'^\d+\.\s*', '', line)
-        if line_no_num.isupper() and len(line_no_num) < 60 and "|" not in line:
-            p = doc.add_paragraph()
-            p.paragraph_format.space_before = Pt(12)
-            run = p.add_run(line_no_num)
-            run.bold = True
-            run.font.size = Pt(12)
-            p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        elif "|" in line and "@" in line:
-            p = doc.add_paragraph(line)
-            p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        elif "|" in line:
-            p = doc.add_paragraph()
-            p.paragraph_format.space_before = Pt(6)
-            run = p.add_run(line)
-            run.bold = True
-        elif line.startswith('-') or line.startswith('•'):
-            doc.add_paragraph(line.replace('-', '').replace('•', '').strip(), style='List Bullet')
-        else:
-            doc.add_paragraph(line)
-    
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
+class ProfessionalPDF(FPDF):
+    def header(self):
+        # No automatic header to allow custom first page design
+        pass 
 
 def create_pdf(text):
-    class PDF(FPDF):
-        def header(self): pass
-        def footer(self): pass
-    pdf = PDF()
+    pdf = ProfessionalPDF()
     pdf.add_page()
-    pdf.add_font('Amiri', '', FONT_PATH, uni=True)
-    pdf.set_font('Amiri', '', 11)
     
-    text = text.replace("**", "").replace("##", "")
-    for line in text.split('\n'):
+    # Register Fonts
+    pdf.add_font('Amiri', '', FONT_PATH, uni=True)
+    pdf.add_font('Amiri-Bold', '', FONT_BOLD_PATH, uni=True)
+    
+    # --- 1. HEADER SECTION (Name & Contact) ---
+    pdf.set_font('Amiri-Bold', '', 24)
+    pdf.set_text_color(*PRIMARY_COLOR)
+    
+    # Get Name from text (First Line)
+    lines = text.split('\n')
+    name = lines[0].strip()
+    pdf.cell(0, 10, process_text_for_pdf(name), ln=True, align='C')
+    
+    # Contact Line (Second Line)
+    if len(lines) > 1:
+        pdf.set_font('Amiri', '', 10)
+        pdf.set_text_color(*SECONDARY_COLOR)
+        contact = lines[1].strip()
+        pdf.cell(0, 6, process_text_for_pdf(contact), ln=True, align='C')
+        pdf.ln(4)
+        
+        # Draw Line
+        pdf.set_draw_color(*PRIMARY_COLOR)
+        pdf.set_line_width(0.5)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(6)
+
+    # --- 2. BODY CONTENT ---
+    pdf.set_text_color(*TEXT_COLOR)
+    
+    for line in lines[2:]: # Skip name and contact
         line = line.strip()
         if not line: continue
-        if "___" in line: continue
         
-        line = process_text_for_pdf(line)
-        line_no_num = re.sub(r'^\d+\.\s*', '', line)
+        # Process Arabic
+        display_line = process_text_for_pdf(line)
         
-        is_header = False
-        if len(line) < 50 and "|" not in line and "." not in line and not line.startswith("-") and not line.startswith("•"):
-             if re.search(r'[A-Z]', line) and line.isupper(): is_header = True
-
-        if is_header:
-            pdf.ln(5)
-            pdf.set_font("Amiri", '', 13)
-            pdf.cell(0, 6, line, ln=True, align='C')
-            x = pdf.get_x()
-            y = pdf.get_y()
-            pdf.line(10, y, 200, y)
-            pdf.ln(3)
-            pdf.set_font("Amiri", '', 11)
-        elif "|" in line and "@" in line:
-            pdf.set_font("Amiri", '', 10)
-            pdf.multi_cell(0, 5, line, align='C')
-            pdf.ln(3)
-        elif "|" in line and "@" not in line:
-            pdf.ln(3)
-            pdf.set_font("Amiri", '', 11)
-            pdf.cell(0, 6, line, ln=True, align='L')
-            pdf.ln(1)
-        elif line.startswith('-') or line.startswith('•'):
-            pdf.set_font("Amiri", '', 11)
-            pdf.multi_cell(0, 5, "  " + line, align='L')
-            pdf.ln(1)
-        else:
-            pdf.set_font("Amiri", '', 11)
-            pdf.multi_cell(0, 5, line, align='L')
+        # --- STYLE LOGIC ---
+        
+        # SECTION HEADERS (UpperCase words like EXPERIENCE, EDUCATION)
+        if line.isupper() and len(line) < 40 and "|" not in line:
+            pdf.ln(4)
+            pdf.set_font('Amiri-Bold', '', 13)
+            pdf.set_text_color(*PRIMARY_COLOR)
+            pdf.cell(0, 8, display_line, ln=True, align='L')
+            # Section Underline
+            pdf.set_draw_color(200, 200, 200) # Light Gray
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(2)
+            pdf.set_text_color(*TEXT_COLOR) # Reset color
+            
+        # SUB-HEADERS (Role | Company)
+        elif "|" in line:
+            pdf.set_font('Amiri-Bold', '', 11)
+            pdf.cell(0, 6, display_line, ln=True)
+            
+        # BULLET POINTS
+        elif line.startswith("-") or line.startswith("•"):
+            pdf.set_font('Amiri', '', 10)
+            clean_line = line.replace("-", "").replace("•", "").strip()
+            # Indent bullet
+            pdf.set_x(15) 
+            pdf.multi_cell(0, 5, "• " + process_text_for_pdf(clean_line))
             pdf.ln(1)
             
+        # NORMAL TEXT
+        else:
+            pdf.set_font('Amiri', '', 10)
+            pdf.multi_cell(0, 5, display_line)
+            pdf.ln(1)
+
     buffer = io.BytesIO()
     buffer.write(pdf.output(dest='S').encode("latin1"))
     buffer.seek(0)
     return buffer
 
+def create_docx(text):
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Arial'
+    style.font.size = Pt(10)
+    
+    lines = text.split('\n')
+    
+    # Name (Header)
+    head = doc.add_paragraph()
+    head.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    run = head.add_run(lines[0])
+    run.bold = True
+    run.font.size = Pt(20)
+    run.font.color.rgb = RGBColor(0, 51, 102) # Navy Blue
+    
+    # Contact
+    if len(lines) > 1:
+        contact = doc.add_paragraph(lines[1])
+        contact.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        contact.runs[0].font.size = Pt(10)
+        contact.runs[0].font.color.rgb = RGBColor(105, 105, 105)
+
+    for line in lines[2:]:
+        line = line.strip()
+        if not line: continue
+        
+        if line.isupper() and len(line) < 40 and "|" not in line:
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(12)
+            p.paragraph_format.space_after = Pt(3)
+            run = p.add_run(line)
+            run.bold = True
+            run.font.size = Pt(12)
+            run.font.color.rgb = RGBColor(0, 51, 102)
+            # Underline hack
+            p_border = doc.add_paragraph() # Simulating spacing/border with empty para for now
+            
+        elif "|" in line:
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(6)
+            run = p.add_run(line)
+            run.bold = True
+            
+        elif line.startswith("-") or line.startswith("•"):
+            p = doc.add_paragraph(line.replace("-", "").replace("•", "").strip(), style='List Bullet')
+        else:
+            doc.add_paragraph(line)
+            
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
 # ==========================================
-# 6. SESSION STATE INITIALIZATION
+# 6. SESSION INIT
 # ==========================================
 if 'step' not in st.session_state: st.session_state.step = 1
 if 'cv_data' not in st.session_state: st.session_state.cv_data = {}
 
-# Initialize Structured Lists
-if 'education_entries' not in st.session_state.cv_data:
-    st.session_state.cv_data['education_entries'] = [{'uni': '', 'col': '', 'deg': '', 'year': ''}]
-if 'project_entries' not in st.session_state.cv_data:
-    st.session_state.cv_data['project_entries'] = []
-if 'cert_entries' not in st.session_state.cv_data:
-    st.session_state.cv_data['cert_entries'] = []
-if 'vol_entries' not in st.session_state.cv_data:
-    st.session_state.cv_data['vol_entries'] = []
+# Lists
+if 'education_entries' not in st.session_state.cv_data: st.session_state.cv_data['education_entries'] = [{'uni': '', 'col': '', 'deg': '', 'year': ''}]
+if 'project_entries' not in st.session_state.cv_data: st.session_state.cv_data['project_entries'] = []
+if 'cert_entries' not in st.session_state.cv_data: st.session_state.cv_data['cert_entries'] = []
+if 'vol_entries' not in st.session_state.cv_data: st.session_state.cv_data['vol_entries'] = []
 
 for k in ['final_cv', 'cover_letter', 'ats_analysis']:
     if k not in st.session_state: st.session_state[k] = ""
 
-if st.session_state.step > 6: st.session_state.step = 1; st.rerun()
 def next_step(): st.session_state.step += 1
 def prev_step(): st.session_state.step -= 1
 
@@ -253,7 +291,7 @@ def prev_step(): st.session_state.step -= 1
 st.title("🚀 Elite CV Builder")
 if st.session_state.step < 6: st.progress(st.session_state.step / 6)
 
-# --- STEP 1: PERSONAL INFO ---
+# STEP 1
 if st.session_state.step == 1:
     st.header("1️⃣ Personal Info & Education")
     
@@ -265,13 +303,10 @@ if st.session_state.step == 1:
                     text = extract_text_from_pdf(f) if f.name.endswith('.pdf') else extract_text_from_docx(f)
                     data = parse_resume_with_ai(text)
                     if data: 
-                        # Basic fields
                         st.session_state.cv_data.update({k:v for k,v in data.items() if k != 'education_list'})
-                        # Try to fill education list if AI returned it
                         if 'education_list' in data and isinstance(data['education_list'], list):
                              st.session_state.cv_data['education_entries'] = data['education_list']
-                        st.success("Extracted!")
-                        st.rerun()
+                        st.success("Extracted!"); st.rerun()
                 except: st.error("Error parsing.")
 
     with st.form("s1"):
@@ -288,16 +323,10 @@ if st.session_state.step == 1:
         
         st.markdown("---")
         target_title = st.text_input("🔴 Target Job Title", st.session_state.cv_data.get('target_title', ''))
-        
-        st.write("") # Submit button handling is below to allow dynamic add outside form
-        submitted = st.form_submit_button("Save Personal Info")
-        if submitted:
-             st.session_state.cv_data.update({'name':name, 'email':email, 'phone':phone, 'linkedin':linkedin, 'city':city, 'portfolio':portfolio, 'github':github, 'target_title':target_title})
+        st.write(""); submitted = st.form_submit_button("Save Info")
+        if submitted: st.session_state.cv_data.update({'name':name, 'email':email, 'phone':phone, 'linkedin':linkedin, 'city':city, 'portfolio':portfolio, 'github':github, 'target_title':target_title})
 
-    # --- DYNAMIC EDUCATION ---
     st.markdown("### 🎓 Education")
-    st.info("Add your degrees below. Output will be: Degree, College, University | Year")
-    
     for i, entry in enumerate(st.session_state.cv_data['education_entries']):
         with st.container(border=True):
             cols = st.columns([3, 3, 3, 2, 1])
@@ -306,24 +335,18 @@ if st.session_state.step == 1:
             with cols[2]: entry['deg'] = st.text_input(f"Degree", entry.get('deg',''), key=f"deg_{i}")
             with cols[3]: entry['year'] = st.text_input(f"Year", entry.get('year',''), key=f"year_{i}")
             with cols[4]: 
-                st.write("") 
-                if st.button("🗑️", key=f"del_edu_{i}"):
-                    st.session_state.cv_data['education_entries'].pop(i)
-                    st.rerun()
+                st.write(""); 
+                if st.button("🗑️", key=f"del_edu_{i}"): st.session_state.cv_data['education_entries'].pop(i); st.rerun()
 
     if st.button("➕ Add Education"):
-        st.session_state.cv_data['education_entries'].append({'uni': '', 'col': '', 'deg': '', 'year': ''})
-        st.rerun()
+        st.session_state.cv_data['education_entries'].append({'uni': '', 'col': '', 'deg': '', 'year': ''}); st.rerun()
 
     st.markdown("---")
     if st.button("Next Step ➡️"):
-        if st.session_state.cv_data.get('name') and st.session_state.cv_data.get('target_title'):
-            next_step()
-            st.rerun()
-        else:
-            st.warning("Please fill Name and Target Job Title!")
+        if st.session_state.cv_data.get('name') and st.session_state.cv_data.get('target_title'): next_step(); st.rerun()
+        else: st.warning("Please fill Name and Target Job Title!")
 
-# --- STEP 2: SKILLS ---
+# STEP 2
 elif st.session_state.step == 2:
     st.header("2️⃣ Skills")
     with st.form("s2"):
@@ -335,7 +358,7 @@ elif st.session_state.step == 2:
         with c2:
             if st.form_submit_button("Next ➡️"): st.session_state.cv_data.update({'skills':skills, 'languages':langs}); next_step(); st.rerun()
 
-# --- STEP 3: EXPERIENCE ---
+# STEP 3
 elif st.session_state.step == 3:
     st.header("3️⃣ Experience")
     c_in, c_bt = st.columns([3, 1])
@@ -355,28 +378,21 @@ elif st.session_state.step == 3:
         with c2:
             if st.form_submit_button("Next ➡️"): st.session_state.cv_data['raw_experience'] = exp; next_step(); st.rerun()
 
-# --- STEP 4: PROJECTS & EXTRAS (STRUCTURED) ---
+# STEP 4
 elif st.session_state.step == 4:
     st.header("4️⃣ Projects & Extras")
-    
     t1, t2, t3 = st.tabs(["Projects", "Certifications", "Volunteering"])
     
-    # 1. PROJECTS
     with t1:
         for i, proj in enumerate(st.session_state.cv_data['project_entries']):
             with st.container(border=True):
                 c1, c2 = st.columns([1, 1])
                 with c1: proj['title'] = st.text_input(f"Title #{i+1}", proj.get('title',''), key=f"pj_t_{i}")
-                with c2: proj['link'] = st.text_input(f"Link #{i+1}", proj.get('link',''), key=f"pj_l_{i}")
-                proj['desc'] = st.text_area(f"Description #{i+1}", proj.get('desc',''), key=f"pj_d_{i}")
-                if st.button("🗑️ Remove Project", key=f"del_pj_{i}"):
-                    st.session_state.cv_data['project_entries'].pop(i)
-                    st.rerun()
-        if st.button("➕ Add Project"):
-            st.session_state.cv_data['project_entries'].append({'title': '', 'link': '', 'desc': ''})
-            st.rerun()
+                with c2: proj['link'] = st.text_input(f"Link", proj.get('link',''), key=f"pj_l_{i}")
+                proj['desc'] = st.text_area(f"Description", proj.get('desc',''), key=f"pj_d_{i}")
+                if st.button("🗑️", key=f"del_pj_{i}"): st.session_state.cv_data['project_entries'].pop(i); st.rerun()
+        if st.button("➕ Add Project"): st.session_state.cv_data['project_entries'].append({'title': '', 'link': '', 'desc': ''}); st.rerun()
 
-    # 2. CERTIFICATIONS
     with t2:
         for i, cert in enumerate(st.session_state.cv_data['cert_entries']):
             with st.container(border=True):
@@ -384,34 +400,25 @@ elif st.session_state.step == 4:
                 with c1: cert['title'] = st.text_input(f"Name #{i+1}", cert.get('title',''), key=f"ct_t_{i}")
                 with c2: cert['auth'] = st.text_input(f"Issuer", cert.get('auth',''), key=f"ct_a_{i}")
                 with c3: 
-                    st.write("")
-                    if st.button("🗑️", key=f"del_ct_{i}"):
-                        st.session_state.cv_data['cert_entries'].pop(i)
-                        st.rerun()
-        if st.button("➕ Add Certificate"):
-            st.session_state.cv_data['cert_entries'].append({'title': '', 'auth': ''})
-            st.rerun()
+                    st.write(""); 
+                    if st.button("🗑️", key=f"del_ct_{i}"): st.session_state.cv_data['cert_entries'].pop(i); st.rerun()
+        if st.button("➕ Add Certificate"): st.session_state.cv_data['cert_entries'].append({'title': '', 'auth': ''}); st.rerun()
 
-    # 3. VOLUNTEERING
     with t3:
         for i, vol in enumerate(st.session_state.cv_data['vol_entries']):
             with st.container(border=True):
                 vol['role'] = st.text_input(f"Role #{i+1}", vol.get('role',''), key=f"vl_r_{i}")
                 vol['org'] = st.text_input(f"Organization", vol.get('org',''), key=f"vl_o_{i}")
                 vol['desc'] = st.text_area(f"Description", vol.get('desc',''), key=f"vl_d_{i}")
-                if st.button("🗑️ Remove", key=f"del_vl_{i}"):
-                    st.session_state.cv_data['vol_entries'].pop(i)
-                    st.rerun()
-        if st.button("➕ Add Volunteering"):
-            st.session_state.cv_data['vol_entries'].append({'role': '', 'org': '', 'desc': ''})
-            st.rerun()
+                if st.button("🗑️", key=f"del_vl_{i}"): st.session_state.cv_data['vol_entries'].pop(i); st.rerun()
+        if st.button("➕ Add Volunteering"): st.session_state.cv_data['vol_entries'].append({'role': '', 'org': '', 'desc': ''}); st.rerun()
 
     st.markdown("---")
     c_back, c_next = st.columns([1, 5])
     if c_back.button("Back"): prev_step(); st.rerun()
     if c_next.button("Next Step ➡️"): next_step(); st.rerun()
 
-# --- STEP 5: TARGET JOB ---
+# STEP 5
 elif st.session_state.step == 5:
     st.header("5️⃣ Target Job")
     with st.form("s5"):
@@ -422,10 +429,9 @@ elif st.session_state.step == 5:
         with c2:
             if st.form_submit_button("Generate CV 🚀"): st.session_state.cv_data['target_job'] = jd; next_step(); st.rerun()
 
-# --- STEP 6: RESULT ---
+# STEP 6
 elif st.session_state.step == 6:
     st.balloons(); st.success("CV Ready!")
-    
     raw_name = st.session_state.cv_data.get('name', 'User')
     safe_name = "".join([c if c.isalnum() or c==" " else "_" for c in raw_name]).strip().replace(" ", "_") or "CV"
     
@@ -443,7 +449,6 @@ elif st.session_state.step == 6:
                 edu_lines = []
                 for e in st.session_state.cv_data['education_entries']:
                     if e.get('uni') or e.get('col'):
-                        # Build one line: Degree, College, Uni | Year
                         parts = [x for x in [e.get('deg'), e.get('col'), e.get('uni')] if x]
                         line = ", ".join(parts)
                         if e.get('year'): line += f" | {e.get('year')}"
@@ -457,31 +462,40 @@ elif st.session_state.step == 6:
                         head = p['title']
                         if p.get('link'): head += f" | {p['link']}"
                         proj_lines.append(f"**{head}**\n{p.get('desc','')}")
-                proj_block = "PROJECTS\n" + "\n\n".join(proj_lines) if proj_lines else ""
+                proj_block = "PROJECTS\n" + "\n\n".join(proj_lines) + "\n" if proj_lines else ""
 
                 # Certs Loop
                 cert_lines = []
                 for c in st.session_state.cv_data['cert_entries']:
                     if c.get('title'): cert_lines.append(f"- {c['title']} | {c.get('auth','')}")
-                cert_block = "CERTIFICATIONS\n" + "\n".join(cert_lines) if cert_lines else ""
+                cert_block = "CERTIFICATIONS\n" + "\n".join(cert_lines) + "\n" if cert_lines else ""
 
                 # Vol Loop
                 vol_lines = []
                 for v in st.session_state.cv_data['vol_entries']:
                     if v.get('role'): vol_lines.append(f"**{v['role']} | {v.get('org','')}**\n{v.get('desc','')}")
-                vol_block = "VOLUNTEERING\n" + "\n\n".join(vol_lines) if vol_lines else ""
+                vol_block = "VOLUNTEERING\n" + "\n\n".join(vol_lines) + "\n" if vol_lines else ""
                 
-                langs = f"LANGUAGES ({st.session_state.cv_data['languages']})" if st.session_state.cv_data.get('languages') else ""
+                langs = f"LANGUAGES\n- {st.session_state.cv_data['languages']}" if st.session_state.cv_data.get('languages') else ""
 
                 prompt = f"""
                 Act as a Resume Expert. Rewrite in Professional ENGLISH.
-                RULES: 1. Translate Arabic to English. 2. Clean Text (No Markdown Bold). 3. No Numbered Sections.
+                RULES: 1. Translate Arabic to English. 2. Do not invent data. 3. Clean Text (No Markdown Bold). 4. Use UPPERCASE for Section Headers.
                 
-                HEADER: {st.session_state.cv_data['name'].upper()} \n {c_line}
-                SUMMARY (Target: {st.session_state.cv_data['target_title']})
-                SKILLS ({st.session_state.cv_data['skills']})
-                EXPERIENCE: {st.session_state.cv_data['raw_experience']}
+                {st.session_state.cv_data['name'].upper()}
+                {c_line}
+                
+                PROFESSIONAL SUMMARY
+                (Write a summary for {st.session_state.cv_data['target_title']})
+                
+                TECHNICAL SKILLS
+                {st.session_state.cv_data['skills']}
+                
+                EXPERIENCE
+                {st.session_state.cv_data['raw_experience']}
+                
                 {edu_block}
+                
                 {proj_block}
                 {cert_block}
                 {vol_block}
