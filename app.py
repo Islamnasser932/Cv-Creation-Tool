@@ -94,45 +94,41 @@ def safe_generate(prompt_text):
     except Exception as e: return f"Error: {str(e)}"
 
 # ==========================================
-# 5. PROFESSIONAL PDF GENERATOR (FIXED)
+# 5. PROFESSIONAL PDF GENERATOR
 # ==========================================
 class ProfessionalPDF(FPDF):
     def header(self): pass 
 
 def create_pdf(text):
-    # Reduced margins to fit long links (Left/Right = 8mm)
+    # Reduced margins (Left/Right = 8mm)
     pdf = ProfessionalPDF(orientation='P', unit='mm', format='A4')
     pdf.set_margins(left=8, top=10, right=8) 
     pdf.add_page()
     
-    # Safe Font Loading
     try:
         pdf.add_font('Amiri', '', FONT_PATH, uni=True)
         pdf.add_font('Amiri-Bold', '', FONT_BOLD_PATH, uni=True)
     except:
-        pdf.add_font('Arial', '', '', uni=True) # Fallback
+        pdf.add_font('Arial', '', '', uni=True) 
 
     # --- 1. HEADER ---
     lines = text.split('\n')
-    
-    # Remove any "CONTACT INFORMATION" header artifact
     clean_lines = [l for l in lines if "CONTACT INFORMATION" not in l.upper()]
     lines = clean_lines
 
     # Name
     name = lines[0].strip()
-    pdf.set_font('Amiri-Bold', '', 22) # Big Name
+    pdf.set_font('Amiri-Bold', '', 22)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, process_text_for_pdf(name), ln=True, align='C')
     
-    # Contact Info (Smaller font to fit links)
+    # Contact Info
     if len(lines) > 1:
-        pdf.set_font('Amiri', '', 9) # Smaller font for links
+        pdf.set_font('Amiri', '', 9)
         contact = lines[1].strip()
         pdf.multi_cell(0, 5, process_text_for_pdf(contact), align='C')
         pdf.ln(2)
         
-        # Line Separator
         pdf.set_draw_color(0, 0, 0)
         pdf.set_line_width(0.4)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
@@ -145,16 +141,15 @@ def create_pdf(text):
         
         display_line = process_text_for_pdf(line.replace("### ", ""))
         
-        # SECTION HEADERS
+        # HEADERS
         if line.startswith("### "):
             pdf.ln(3)
             pdf.set_font('Amiri-Bold', '', 12)
             pdf.cell(0, 7, display_line.upper(), ln=True, align='L')
-            # Underline
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
             pdf.ln(2)
             
-        # SUB-HEADERS (Jobs/Projects) - Bold
+        # SUB-HEADERS
         elif "|" in line and not line.startswith("-") and not line.startswith("•"):
             pdf.ln(1)
             pdf.set_font('Amiri-Bold', '', 10)
@@ -167,7 +162,7 @@ def create_pdf(text):
             pdf.set_x(12) 
             pdf.multi_cell(190, 5, "• " + process_text_for_pdf(clean_line))
             
-        # NORMAL TEXT (Skills paragraph / Summary)
+        # NORMAL TEXT
         else:
             pdf.set_font('Amiri', '', 10)
             pdf.multi_cell(0, 5, display_line)
@@ -184,7 +179,6 @@ def create_docx(text):
     lines = text.split('\n')
     clean_lines = [l for l in lines if "CONTACT INFORMATION" not in l.upper()]
     
-    # Header
     head = doc.add_paragraph(); head.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
     run = head.add_run(clean_lines[0]); run.bold = True; run.font.size = Pt(20)
     
@@ -363,7 +357,7 @@ elif st.session_state.step == 6:
     with t1:
         if not st.session_state.final_cv:
             with st.spinner("Compiling Resume..."):
-                # Contact Line (Include Portfolio/GitHub)
+                # Contact Line
                 info = [st.session_state.cv_data[k] for k in ['phone', 'city', 'email', 'linkedin', 'portfolio', 'github'] if st.session_state.cv_data.get(k)]
                 c_line = " | ".join(info)
                 
@@ -395,21 +389,21 @@ elif st.session_state.step == 6:
                 
                 langs = f"### LANGUAGES\n- {st.session_state.cv_data['languages']}" if st.session_state.cv_data.get('languages') else ""
 
-                # PROMPT FIX: Force Comma Separated Skills & No Header Text
+                # --- PROMPT: REVERSE CHRONOLOGICAL ORDER FIX ---
                 prompt = f"""
                 Act as a Resume Expert. Rewrite in Professional ENGLISH.
                 
                 CRITICAL RULES:
-                1. **SKILLS:** Write technical skills as a **COMMA-SEPARATED PARAGRAPH**. Do NOT use bullet points or vertical lists.
-                2. **NO HEADER:** Do NOT write "CONTACT INFORMATION" at the top. Just start with the name.
-                3. **METRICS:** Invent realistic numbers for Experience duties.
-                4. **CLEAN:** No markdown bold (**). Use "### " ONLY for main section headers (EXPERIENCE, EDUCATION, etc).
+                1. **ORDER:** Sort EXPERIENCE items in **REVERSE CHRONOLOGICAL ORDER** (Newest job first, Oldest last).
+                2. **METRICS:** Add numbers/metrics to Experience descriptions (e.g. "Increased by 20%").
+                3. **SKILLS:** Comma-separated paragraph.
+                4. **CLEAN:** No "CONTACT INFORMATION" header. No markdown bold. Use "### " for sections.
                 
                 {st.session_state.cv_data['name'].upper()}
                 {c_line}
                 
                 ### PROFESSIONAL SUMMARY
-                (Write summary for {st.session_state.cv_data['target_title']})
+                (Summary for {st.session_state.cv_data['target_title']})
                 
                 ### TECHNICAL SKILLS
                 {st.session_state.cv_data['skills']}
