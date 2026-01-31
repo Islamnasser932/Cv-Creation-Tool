@@ -6,9 +6,6 @@ from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from fpdf import FPDF
 import io
-import re
-import json
-from pypdf import PdfReader
 import requests
 import arabic_reshaper
 from bidi.algorithm import get_display
@@ -66,21 +63,6 @@ def process_text_for_pdf(text):
     try: return get_display(arabic_reshaper.reshape(text))
     except: return text
 
-def extract_text_from_pdf(file):
-    reader = PdfReader(file); text = "" 
-    for page in reader.pages: text += page.extract_text()
-    return text
-
-def extract_text_from_docx(file):
-    doc = Document(file); return "\n".join([para.text for para in doc.paragraphs])
-
-def parse_resume_with_ai(text):
-    prompt = f"Extract details. Source: {text[:6000]}. Output JSON: name, email, phone, city, linkedin, portfolio, github, target_title, skills, experience, education_list."
-    try:
-        completion = client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], response_format={"type": "json_object"})
-        return json.loads(completion.choices[0].message.content)
-    except: return None
-
 def get_job_suggestions(role_title):
     try:
         completion = client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": f"Give 5 English resume bullet points for {role_title} with metrics."}])
@@ -94,7 +76,7 @@ def safe_generate(prompt_text):
     except Exception as e: return f"Error: {str(e)}"
 
 # ==========================================
-# 5. PROFESSIONAL PDF GENERATOR
+# 5. PROFESSIONAL PDF GENERATOR (BOLD HEADERS FIXED)
 # ==========================================
 class ProfessionalPDF(FPDF):
     def header(self): pass 
@@ -139,25 +121,17 @@ def create_pdf(text):
         
         display_line = process_text_for_pdf(line.replace("### ", ""))
         
-# HEADERS (Section Titles like EXPERIENCE)
+        # --- HEADERS (FIXED: BOLD & BIGGER) ---
         if line.startswith("### "):
-            pdf.ln(5) # مسافة قبل العنوان
-            
-            # هنا التعديل: تأكد إن اسم الخط Amiri-Bold وحجمه 14 أو 15
-            pdf.set_font('Amiri-Bold', '', 15) 
-            pdf.set_text_color(*PRIMARY_COLOR) # لون أسود
-            
-            # كتابة العنوان
+            pdf.ln(5)
+            pdf.set_font('Amiri-Bold', '', 15) # Bold and Size 15
+            pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 8, display_line.upper(), ln=True, align='L')
             
-            # الخط الفاصل (Thick Line)
-            pdf.set_draw_color(0, 0, 0)
             pdf.set_line_width(0.5) 
             pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-            pdf.set_line_width(0.2) # نرجع الخط رفيع تاني
-            
-            pdf.ln(3) # مسافة بعد العنوان
-            pdf.set_text_color(*TEXT_COLOR)
+            pdf.set_line_width(0.2)
+            pdf.ln(3)
             
         elif "|" in line and not line.startswith("-") and not line.startswith("•"):
             pdf.ln(1)
@@ -234,18 +208,7 @@ if st.session_state.step < 6: st.progress(st.session_state.step / 6)
 # STEP 1
 if st.session_state.step == 1:
     st.header("1️⃣ Personal Info")
-    with st.expander("📄 Auto-Fill"):
-        f = st.file_uploader("Upload PDF/Word", type=['pdf', 'docx'])
-        if f and st.button("Extract"):
-            with st.spinner("Processing..."):
-                try:
-                    text = extract_text_from_pdf(f) if f.name.endswith('.pdf') else extract_text_from_docx(f)
-                    data = parse_resume_with_ai(text)
-                    if data: 
-                        st.session_state.cv_data.update({k:v for k,v in data.items() if k != 'education_list'})
-                        if 'education_list' in data: st.session_state.cv_data['education_entries'] = data['education_list']
-                        st.success("Done!"); st.rerun()
-                except: st.error("Error.")
+    # REMOVED AUTO-FILL SECTION HERE
 
     with st.form("s1"):
         c1, c2 = st.columns(2)
@@ -450,4 +413,3 @@ elif st.session_state.step == 6:
 
     st.markdown("---"); 
     if st.button("Start Over"): st.session_state.step = 1; st.session_state.cv_data = {}; st.session_state.final_cv = ""; st.rerun()
-
